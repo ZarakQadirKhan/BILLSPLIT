@@ -14,7 +14,11 @@ export async function prepareImage(file) {
   const scale = Math.min(1, 2400 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas'); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
   const ctx = canvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
-  return new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(Error('Could not read this image.')), 'image/jpeg', .9));
+  for (const quality of [.9, .75, .6, .45]) {
+    const blob = await new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(Error('Could not read this image.')), 'image/jpeg', quality));
+    if (blob.size <= 2 * 1024 * 1024) return blob;
+  }
+  throw Error('This image is too large after compression. Crop the receipt and try again.');
 }
 export async function scanImage(blob, progress) {
   const { createWorker } = await import('tesseract.js'); let worker;

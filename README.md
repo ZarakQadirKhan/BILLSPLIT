@@ -1,6 +1,6 @@
 # Tab Together
 
-A free bill-splitting app for a group of friends. Built with React, Vite, Express, SQLite, and Tesseract.js. No paid APIs, LLMs, credit card, subscription, cloud account, or external runtime service is required.
+A free bill-splitting app for a group of friends. Built with React, Vite, Express, SQLite, and Tesseract.js. Local use needs no paid APIs, LLMs, credit card, subscription, or cloud account. Optional Vercel deployment uses a persistent Turso database; see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Run it
 
@@ -23,7 +23,7 @@ The server listens on port 5173. Set `PORT` to use another port. `DATA_DIR` chan
 
 Keep this computer awake and the server running. On the **same trusted Wi-Fi**, friends can open `http://YOUR_COMPUTER_LAN_IP:5173`. Use that address yourself when creating invitations so the links work on their phones. Your router must allow devices to communicate, and the system firewall may need to permit Node.
 
-This is a working shared backend, not a browser-only mockup: every connected device uses the same SQLite database. Friends cannot connect once this computer sleeps or the server stops. The app has **not** been publicly deployed and has no always-online hosting configured. No paid service was provisioned. For a future public deployment, choose and verify a no-cost host first, add HTTPS, and review its storage and usage limits. Do not expose this development server directly to the internet.
+This is a working shared backend, not a browser-only mockup: every connected device uses the same SQLite database. Friends cannot connect once this computer sleeps or the server stops. The repository now includes Vercel deployment configuration and optional Turso persistence. These files do not provision hosting or a database by themselves. For a future public deployment, choose and verify a no-cost host first, add HTTPS, and review its storage and usage limits. Do not expose this development server directly to the internet.
 
 Local HTTP is for trusted Wi-Fi testing. HTTPS is needed for confidential traffic on an untrusted network, secure clipboard APIs, and a full installable/offline PWA. Clipboard fallback text is provided. There is a web app manifest, but no offline service worker or background push subscription.
 
@@ -36,8 +36,14 @@ Local HTTP is for trusted Wi-Fi testing. HTTPS is needed for confidential traffi
 5. Check every extracted field. Edit quantities, unit prices, line totals, discounts, tax, fees, and the actual charged amount. A manual line-total override is labeled; editing quantity or unit price restores automatic line arithmetic.
 6. Add participants and select the original payer. Assign item quantities or share an item equally, including fractional quantities. Unassigned and over-assigned items are flagged. The payer must have joined and saved transfer instructions before sending.
 7. Save a private draft or send shares. Sending is blocked until all item units are assigned, the calculated and entered receipt totals agree, and no share is negative. Published bills are locked; their money amounts are recalculated and validated on the server.
-8. Each participant accepts or questions their share, transfers outside the app, then marks it paid with an optional reference. The payer confirms receipt or rejects the claim with a note. **A marked-paid share remains outstanding until the payer confirms it.**
-9. Overview shows both money owed and money to collect. Activity contains persistent notifications, refreshed every 10 seconds while the app is visible. Settled bills remain in history.
+8. Each participant can accept or question their share, or directly choose **I’ve paid** on any unpaid transaction after transferring outside the app. Marking paid includes an optional reference and no longer requires a separate acceptance click. The payer confirms receipt or rejects the claim with a note. **A marked-paid share remains outstanding until the payer confirms it.**
+9. Overview shows both money owed and money to collect. Activity contains persistent notifications, refreshed every 30 seconds while the app is visible. Settled bills remain in history.
+
+## inDrive rides
+
+Choose **Add a bill → inDrive ride**, enter the complete fare, select everyone who was in the car, and choose who paid. The app splits the fare equally among all selected passengers, including the payer. The payer owes no money to themselves; their own share is excluded from the payment-request list. Other passengers see their debt and the payer's transfer details. Shares automatically recalculate when passengers change; rounding is distributed by paisa.
+
+For example, Rs 1,200 shared by four passengers is Rs 300 each. The payer sees Rs 900 to collect, with three Rs 300 requests.
 
 ## Calculation rules
 
@@ -54,7 +60,7 @@ All stored money is integer **paisa**. Percentage calculations round once to pai
 
 ## Data and privacy
 
-The durable database, including receipt images, lives at `data/tab-together.sqlite` (ignored by Git). Back up the entire `data/` directory with the server stopped; SQLite WAL files can contain recent writes while it is running. Application data does not leave this server except to authorized participants' browsers. OCR assets and fonts do not depend on external CDNs.
+By default, the durable **SQLite** database, including receipt images, lives at `data/tab-together.sqlite` (ignored by Git). If `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are configured, the same schema lives in Turso instead. Vercel requires the remote database and never falls back to temporary file storage. Back up the entire `data/` directory with the server stopped; SQLite WAL files can contain recent writes while it is running. In local mode, application data remains on this computer and authorized participants' browsers. With Turso enabled, it is stored in your hosted database and accessed through the authenticated API. OCR assets and fonts do not depend on external CDNs.
 
 Session, invitation, and recovery tokens are cryptographically random; only their hashes are stored on the server. Server-side authorization controls every bill, receipt, and payment action. Drafts are creator-only. Editing uses a version check to avoid silently overwriting another device. Published shares are immutable. Keep recovery codes and invitation links private; account recovery does not revoke existing sessions.
 
@@ -76,6 +82,6 @@ The optional `read_my_balances` WebMCP tool is feature-detected in supported bro
 - One receipt image per bill; no PDF or multi-image receipt import.
 - In-app activity notifications; no email, SMS, or background push.
 - Sent bills cannot yet be corrected or canceled in the interface. Resolve disputes before accepting or transferring. Creating a second bill does not cancel the first.
-- No public hosting or internet-wide access has been activated, to preserve the zero-spending requirement.
+- Vercel deployment is prepared, but your Vercel account and a free Turso database must be connected before the app can run online. See [the deployment guide](DEPLOYMENT.md).
 
 The repository itself uses no billable service. Electricity/internet and any charges imposed by your existing software subscription are outside the app's control.

@@ -26,7 +26,22 @@ export function distribute(amount, weights) {
 export function newBill(personId) {
   return { title: '', date: new Date().toLocaleDateString('en-CA'), paidBy: personId, participants: [personId], items: [], discount: { type: 'none', rate: 0, amountCents: 0, eligibleCapCents: null, maxDiscountCents: null }, tax: { type: 'fixed', rate: 0, amountCents: 0, basis: 'after' }, deliveryCents: 0, serviceCents: 0, tipCents: 0, adjustmentCents: 0, adjustmentReason: '', chargeSplit: 'proportional', receiptTotalCents: null, receiptId: null };
 }
+export function newRideBill(personId) {
+  return normalizeBill({ ...newBill(personId), kind: 'ride', title: 'inDrive ride', fareCents: 0 });
+}
+export function normalizeBill(bill) {
+  if (bill?.kind !== 'ride') return bill;
+  const participants = bill.participants || [];
+  return {
+    ...bill,
+    items: [{ id: 'ride-fare', name: 'inDrive fare', quantity: Math.max(1, participants.length), unitPriceCents: 0, lineTotalCents: bill.fareCents, eligible: false, allocations: participants.map(personId => ({ personId, quantity: 1 })) }],
+    discount: { type: 'none', rate: 0, amountCents: 0, eligibleCapCents: null, maxDiscountCents: null },
+    tax: { type: 'fixed', rate: 0, amountCents: 0, basis: 'after' },
+    deliveryCents: 0, serviceCents: 0, tipCents: 0, adjustmentCents: 0, adjustmentReason: '', chargeSplit: 'equal', receiptTotalCents: bill.fareCents, receiptId: null,
+  };
+}
 export function calculate(bill) {
+  bill = normalizeBill(bill);
   const errors = [], shares = {}, eligibleShares = {};
   const ensure = key => shares[key] ||= { items: 0, discount: 0, tax: 0, fees: 0, total: 0 };
   for (const person of bill.participants || []) ensure(person);
@@ -81,6 +96,9 @@ export function validateBill(bill) {
   if (!bill || typeof bill !== 'object') throw Error('Invalid bill.');
   const str = (v, max) => typeof v === 'string' && v.length <= max;
   const cents = (v, negative = false) => Number.isSafeInteger(v) && v >= (negative ? -10000000000 : 0) && v <= 10000000000;
+  if (bill.kind != null && !['food', 'ride'].includes(bill.kind)) throw Error('Choose a food bill or an inDrive ride.');
+  if (bill.kind === 'ride' && !cents(bill.fareCents)) throw Error('Enter a valid ride fare.');
+  bill = normalizeBill(bill);
   if (!str(bill.title, 120) || !bill.title.trim()) throw Error('Give your bill a name.');
   if (!str(bill.date, 10) || !/^\d{4}-\d{2}-\d{2}$/.test(bill.date)) throw Error('Enter a valid date.');
   if (!Array.isArray(bill.participants) || !bill.participants.length || bill.participants.length > 50 || new Set(bill.participants).size !== bill.participants.length) throw Error('Choose 1–50 unique participants.');

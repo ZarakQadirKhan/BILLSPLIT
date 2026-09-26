@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculate, distribute, newBill, validateBill, UNASSIGNED } from '../shared/calculations.js';
+import { calculate, distribute, newBill, newRideBill, validateBill, UNASSIGNED } from '../shared/calculations.js';
 import { parseReceipt } from '../shared/parser.js';
 
 function fixture() { const b = newBill('ali'); b.title = 'Dinner'; b.participants = ['ali','sara','hamza']; b.items = [{ id: 'food', name: 'Platters', quantity: 3, unitPriceCents: 800000, eligible: true, allocations: [{ personId: 'ali', quantity: 1 }, { personId: 'sara', quantity: 1 }, { personId: 'hamza', quantity: 1 }] }, { id: 'drinks', name: 'Drinks', quantity: 6, unitPriceCents: 100000, eligible: true, allocations: [{ personId: 'ali', quantity: 1 }, { personId: 'sara', quantity: 2 }, { personId: 'hamza', quantity: 3 }] }]; return b; }
@@ -14,3 +14,12 @@ test('largest-remainder distribution conserves every paisa over many bills', () 
 test('invalid prices, duplicate allocations, missing adjustment reasons are rejected', () => { const b = fixture(); b.items[0].unitPriceCents = NaN; assert.throws(() => validateBill(b)); b.items[0].unitPriceCents = 100; b.items[0].allocations.push({ personId: 'ali', quantity: 1 }); assert.throws(() => validateBill(b)); b.items[0].allocations.pop(); b.adjustmentCents = 1; assert.throws(() => validateBill(b)); });
 test('parser extracts quantities, discount, tax and total without an LLM', () => { const p = parseReceipt('Dinner House\nBurger 2 x 850 1700\nCold Drink 6 x 200 1200\nDiscount 20% -580\nGST 348\nDelivery 150\nTotal 2818'); assert.equal(p.items.length,2); assert.equal(p.items[1].quantity,6); assert.equal(p.items[1].unitPriceCents,20000); assert.equal(p.charges.discountCents,58000); assert.equal(p.charges.taxCents,34800); assert.equal(p.receiptTotalCents,281800); });
 test('parser preserves printed line total discrepancies for review', () => { const p = parseReceipt('2 Zinger Burger 850 1701\nTotal 1701'); assert.equal(p.items[0].quantity,2); assert.equal(p.items[0].lineTotalCents,170100); });
+test('inDrive fare stays equal when passengers or payer change, with exact rounding', () => {
+  const ride = newRideBill('ali'); ride.participants=['ali','sara','hamza','usman']; ride.fareCents=120000;
+  let result=calculate(ride); assert.equal(result.complete,true); assert.deepEqual(ride.participants.map(p=>result.shares[p].total),[30000,30000,30000,30000]);
+  ride.participants.pop(); ride.paidBy='sara'; ride.fareCents=100001;
+  result=calculate(ride); assert.deepEqual(ride.participants.map(p=>result.shares[p].total),[33334,33334,33333]); assert.equal(result.total-result.shares.sara.total,66667);
+  ride.items=[]; ride.discount.type='fixed'; ride.discount.amountCents=99999;
+  const canonical=validateBill(ride); assert.equal(canonical.items[0].allocations.length,3); assert.equal(canonical.discount.type,'none'); assert.equal(calculate(canonical).total,100001);
+  ride.fareCents=-1; assert.throws(()=>validateBill(ride),/fare/);
+});

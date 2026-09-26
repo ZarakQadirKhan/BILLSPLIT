@@ -3,13 +3,17 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
+import { createClient } from '@libsql/client';
 import { createApi } from '../server/api.js';
-import { newBill, calculate } from '../shared/calculations.js';
+import { newBill, newRideBill, calculate } from '../shared/calculations.js';
 
-test('two-user settlement, auth boundaries, invitation claim, concurrent edits and durable history', async t => {
-  const directory = mkdtempSync(`${tmpdir()}/tab-together-test-`), { api, db } = createApi(directory), app = express(); app.use('/api', api);
+for (const backend of ['sqlite', 'libsql']) test(`${backend}: settlement, rides, permissions, concurrent actions and durable history`, async t => {
+  const directory = mkdtempSync(`${tmpdir()}/tab-together-test-`);
+  const options = () => ({ url: '', requireRemote: false, ...(backend === 'libsql' ? { client:createClient({url:`file:${directory}/remote-compatible.sqlite`}) } : {}) });
+  const { api, db } = await createApi(directory, options()), app = express(); app.use('/api', api);
   const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
-  t.after(() => { server.close(); db.close(); });
+  t.after(async () => { server.close(); await db.close(); });
   const base = `http://127.0.0.1:${server.address().port}/api`;
   async function call(route, token, body, method = body ? 'POST' : 'GET') { const response = await fetch(`${base}${route}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type':'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: response.status, data: await response.json() }; }
   const ali = (await call('/register', null, { name: 'Ali' })).data, stranger = (await call('/register', null, { name: 'Stranger' })).data;
@@ -31,7 +35,8 @@ test('two-user settlement, auth boundaries, invitation claim, concurrent edits a
   const debt = saraState.debts[0]; assert.equal(debt.amount,1000000); assert.equal(debt.creditor_id,ali.user.id);
   assert.equal((await call(`/debts/${debt.id}/action`, stranger.token, { action:'accept' })).status,403);
   assert.equal((await call(`/debts/${debt.id}/action`, sara.token, { action:'confirm' })).status,403);
-  assert.equal((await call(`/debts/${debt.id}/action`, sara.token, { action:'paid' })).status,409);
+  assert.equal((await call(`/debts/${debt.id}/action`, sara.token, { action:'paid' })).data.status,'marked_paid');
+  await call(`/debts/${debt.id}/action`, ali.token, { action:'reject', note:'Checking test transfer' });
   assert.equal((await call(`/debts/${debt.id}/action`, sara.token, { action:'dispute', note:'Check quantity' })).data.status,'disputed');
   assert.equal((await call(`/debts/${debt.id}/action`, sara.token, { action:'accept' })).data.status,'accepted');
   assert.equal((await call(`/debts/${debt.id}/action`, sara.token, { action:'paid', reference:'TEST-123' })).data.status,'marked_paid');
@@ -43,11 +48,31 @@ test('two-user settlement, auth boundaries, invitation claim, concurrent edits a
   assert.equal((await call(`/bills/${saved.id}`, ali.token, { bill:b, version:2 }, 'PUT')).status,409,'published bill locked');
   const recovered = (await call('/recover', null, { code:sara.recoveryCode })).data;
   assert.equal(recovered.user.id,sara.user.id); assert.equal((await call('/state', recovered.token)).data.debts[0].status,'confirmed');
-  const secondDb = createApi(directory); assert.equal(secondDb.db.prepare('SELECT status FROM debts WHERE id=?').get(debt.id).status,'confirmed'); secondDb.db.close();
+  const secondDb = await createApi(directory, options()); assert.equal((await secondDb.db.get('SELECT status FROM debts WHERE id=?',debt.id)).status,'confirmed'); await secondDb.db.close();
   // A claimed invitation can attach an existing account while keeping assignments intact.
   const invite = (await call('/friends', ali.token, { name:'Existing member' })).data;
   const another = newBill(ali.user.id); another.title='Next dinner'; another.participants.push(invite.person.id); another.items=[{ id:'pizza',name:'Pizza',quantity:1,unitPriceCents:10000,eligible:true,allocations:[{personId:invite.person.id,quantity:1}]}];
   const anotherSaved = (await call('/bills',ali.token,{bill:another})).data;
   assert.equal((await call(`/invite/${invite.inviteToken}/claim`,stranger.token,{})).status,200);
   const updated = (await call('/state',ali.token)).data.bills.find(x=>x.id===anotherSaved.id); assert.ok(updated.participants.includes(stranger.user.id)); assert.equal(calculate(updated).shares[stranger.user.id].total,10000);
+  // Equal ride fare, payer exemption, tamper resistance, direct paid button flow.
+  const ride = newRideBill(ali.user.id); ride.title='inDrive to home'; ride.participants=[ali.user.id,sara.user.id,stranger.user.id]; ride.fareCents=100001;
+  ride.items=[{id:'tampered',name:'Unequal fare',quantity:1,unitPriceCents:1,allocations:[]}];
+  const rideSaved=(await call('/bills',ali.token,{bill:ride})).data;
+  assert.equal(rideSaved.items[0].name,'inDrive fare');
+  assert.equal(calculate(rideSaved).shares[sara.user.id].total,33334);
+  assert.equal((await call(`/bills/${rideSaved.id}/publish`,ali.token,{version:rideSaved.version})).status,200);
+  const rides=(await call('/state',ali.token)).data.debts.filter(d=>d.bill_id===rideSaved.id);
+  assert.equal(rides.length,2); assert.ok(rides.every(d=>d.debtor_id!==ali.user.id)); assert.equal(rides.reduce((s,d)=>s+d.amount,0),66667);
+  const rideDebt=rides.find(d=>d.debtor_id===sara.user.id);
+  const claims=await Promise.all([call(`/debts/${rideDebt.id}/action`,sara.token,{action:'paid'}),call(`/debts/${rideDebt.id}/action`,sara.token,{action:'paid'})]);
+  assert.deepEqual(claims.map(r=>r.status).sort(),[200,409],'concurrent duplicate claims must not both succeed');
+  assert.equal((await call('/state',ali.token)).data.debts.find(d=>d.id===rideDebt.id).status,'marked_paid');
+  const photo=readFileSync(new URL('./fixtures/receipt.png',import.meta.url));
+  const upload=await fetch(`${base}/receipts`,{method:'POST',headers:{Authorization:`Bearer ${ali.token}`,'Content-Type':'image/png'},body:photo});
+  assert.equal(upload.status,201); const {receiptId}=await upload.json();
+  assert.equal((await fetch(`${base}/receipts/${receiptId}`,{headers:{Authorization:`Bearer ${stranger.token}`}})).status,403);
+  const downloaded=await fetch(`${base}/receipts/${receiptId}`,{headers:{Authorization:`Bearer ${ali.token}`}});
+  assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()),photo,'receipt binary survives the database adapter');
+
 });

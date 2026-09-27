@@ -17,6 +17,8 @@ const debtResult = row => ({ ...row, paymentStatus: row.status === 'confirmed' ?
 export async function createApi(dataDirectory, options = {}) {
   const db = await openDatabase(dataDirectory, options);
   const mail = createEmailService(db, options.mail);
+  // One read-only SMTP handshake per server instance. No test messages are sent.
+  if (options.background && mail.enabled) options.background(mail.verifySender());
   const getUser = id => db.one('users', { id });
   const selfUser = row => ({ ...publicUser(row), email: row.email || '', emailVerified: !!row.email_verified, emailNotifications: row.email_notifications !== false, emailConfigured: mail.enabled });
   async function deliver() {
@@ -138,8 +140,8 @@ export async function createApi(dataDirectory, options = {}) {
       const people = await db.many('users', { id: { $in: [...visible] } });
       const debts = await db.many('debts', { bill_id: { $in: rows.map(row => row.id) } });
       const events = await db.many('events', { user_id: userId }, { sort: { created_at: -1 }, limit: 200 });
-      const emailQueue = await db.many('email_outbox', { user_id: userId, status: { $in: ['pending', 'sending', 'failed'] } }, { projection: { _id: 0, status: 1 } });
-      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), bills: rows.map(billResult), debts: debts.map(debtResult), events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length } };
+      const emailQueue = await db.many('email_outbox', { user_id: userId, status: { $in: ['pending', 'sending', 'failed'] } }, { projection: { _id: 0, status: 1, last_error: 1 }, sort: { created_at: -1 } });
+      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), bills: rows.map(billResult), debts: debts.map(debtResult), events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
     });
     res.json(state);
   });

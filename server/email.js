@@ -2,12 +2,22 @@ import nodemailer from 'nodemailer';
 import { randomUUID } from 'node:crypto';
 import { money } from '../shared/calculations.js';
 
+// Never serialize an SMTP error: its message/response can contain private data.
+export function emailDiagnostic(error) {
+  const codes = ['EAUTH', 'ETIMEDOUT', 'EDNS', 'ECONNECTION', 'ESOCKET', 'ETLS', 'EENVELOPE', 'EMESSAGE'];
+  const code = codes.includes(error?.code) ? error.code : 'UNKNOWN';
+  const responseCode = Number.isInteger(error?.responseCode) && error.responseCode >= 400 && error.responseCode <= 599 ? error.responseCode : null;
+  const category = code === 'EAUTH' || responseCode === 535 ? 'authentication' : ['ETIMEDOUT', 'EDNS', 'ECONNECTION', 'ESOCKET', 'ETLS'].includes(code) ? 'connection' : responseCode === 421 || responseCode === 450 || responseCode === 454 ? 'temporary_rejection' : code === 'EENVELOPE' ? 'recipient_rejected' : 'delivery_failed';
+  return { category, code, responseCode };
+}
+
 export function createEmailService(db, options = {}) {
   const from = options.from ?? process.env.GMAIL_USER;
   const password = process.env.GMAIL_APP_PASSWORD;
   const baseUrl = options.baseUrl ?? process.env.APP_BASE_URL;
   const enabled = options.enabled ?? !!(from && (options.transport || password) && baseUrl);
   let transport, running;
+  const report = options.report || ((event, diagnostic) => console.info('Email diagnostic:', JSON.stringify({ event, ...diagnostic })));
   if (enabled) {
     const url = new URL(baseUrl);
     if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) throw Error('Email links require an HTTPS APP_BASE_URL.');
@@ -49,10 +59,11 @@ export function createEmailService(db, options = {}) {
         }
         try {
           await transport.sendMail({ from: { name: 'Tab Together', address: from }, to: message.to, subject: `Tab Together: ${message.subject}`, messageId: `<${message.id}@${new URL(baseUrl).hostname}>`, text: `${message.text}\n\nOpen Tab Together: ${link(message.bill_id)}\n\nNo money moves through this app. Only the recipient can confirm receipt after signing in. Manage email notifications in Your profile.` });
-          await db.update('email_outbox', { id: message.id }, { $set: { status: 'sent', sent_at: new Date(), delete_after: new Date(Date.now() + 7 * 86400000) }, $unset: { text: '', code_hash: '' } });
-        } catch {
-          // Do not log SMTP errors: they can contain addresses, content, or credentials.
-          await db.update('email_outbox', { id: message.id }, { $set: { status: message.attempts >= 6 ? 'failed' : 'pending', retry_at: new Date(Date.now() + Math.min(3600000, 60000 * 2 ** message.attempts)) } });
+          await db.update('email_outbox', { id: message.id }, { $set: { status: 'sent', sent_at: new Date(), delete_after: new Date(Date.now() + 7 * 86400000) }, $unset: { text: '', code_hash: '', last_error: '' } });
+        } catch (error) {
+          const diagnostic = emailDiagnostic(error);
+          report('send_failed', diagnostic);
+          await db.update('email_outbox', { id: message.id }, { $set: { last_error: diagnostic, status: message.attempts >= 6 ? 'failed' : 'pending', retry_at: new Date(Date.now() + Math.min(3600000, 60000 * 2 ** message.attempts)) } });
         }
       }
     })().finally(() => { running = null; });
@@ -60,6 +71,11 @@ export function createEmailService(db, options = {}) {
   }
   return {
     enabled,
+    async verifySender() {
+      if (!enabled || !transport.verify) return;
+      try { await transport.verify(); report('sender_verified', { category: 'ok' }); }
+      catch (error) { report('sender_check_failed', emailDiagnostic(error)); }
+    },
     queueDebt,
     queueVerification: (user, code, codeHash) => queue({ kind: 'verification', user_id: user.id, to: user.email, code_hash: codeHash, subject: 'Verify your email address', text: `Your verification code is ${code}. It expires in 15 minutes. Enter it in Your profile. If you did not request this, ignore this email.`, delete_after: new Date(Date.now() + 86400000) }),
     flush,

@@ -4,4 +4,5 @@ import App from './App.jsx';
 import './styles.css';
 import './details.css';
 import './rides.css';
+import './simple.css';
 createRoot(document.getElementById('root')).render(<App />);

@@ -4,6 +4,19 @@ import express from 'express';
 import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
 import { createApi } from '../server/api.js';
 import { newRideBill } from '../shared/calculations.js';
+import { emailDiagnostic, createEmailService } from '../server/email.js';
+
+test('email diagnostics only expose allowlisted codes, never SMTP text or credentials', async () => {
+  const error = Object.assign(Error('secret password and recipient@example.test'), { code: 'EAUTH', responseCode: 535, response: 'private SMTP response', command: 'AUTH secret' });
+  assert.deepEqual(emailDiagnostic(error), { category: 'authentication', code: 'EAUTH', responseCode: 535 });
+  assert.deepEqual(emailDiagnostic({ code: 'secret', responseCode: 'secret' }), { category: 'delivery_failed', code: 'UNKNOWN', responseCode: null });
+  const reports = [];
+  const mail = createEmailService({}, { enabled: true, from: 'sender@example.test', baseUrl: 'https://app.example.test', report: (...args) => reports.push(args), transport: { async verify() { throw error; }, async sendMail() { assert.fail('diagnostic must not send messages'); } } });
+  await mail.verifySender();
+  assert.equal(reports[0][0], 'sender_check_failed');
+  assert.ok(!JSON.stringify(reports).includes('secret'));
+  assert.ok(!JSON.stringify(reports).includes('@'));
+});
 
 test('verified email notifications follow owed → pending approval → confirmed, with durable retries', async t => {
   const replica = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -37,11 +50,14 @@ test('verified email notifications follow owed → pending approval → confirme
   assert.equal((await call(`/bills/${saved.id}/publish`, a.token, { version: saved.version })).status, 200, 'SMTP failure cannot undo the bill');
   const queued = (await db.many('email_outbox', { kind: 'owed' }))[0];
   assert.equal(queued.status, 'pending');
+  assert.equal(queued.last_error.category, 'delivery_failed');
+  assert.equal((await call('/state', b.token)).data.emailDelivery.issue, 'delivery_failed');
   failSending = false;
   await db.update('email_outbox', { id: queued.id }, { $set: { retry_at: new Date(0) } });
   await Promise.all([mail.flush(), mail.flush()]);
   assert.equal(sent.filter(m => m.subject.includes('new bill share')).length, 1, 'concurrent flushes cannot double-send');
   assert.equal(sent.at(-1).to, 'sara@example.test'); assert.match(sent.at(-1).text, /500\.00/);
+  assert.equal((await db.one('email_outbox', { id: queued.id })).last_error, undefined, 'successful retry clears stale failure');
   assert.match(sent.at(-1).text, new RegExp(`#bill=${saved.id}`));
   const state = (await call('/state', b.token)).data, debt = state.debts[0];
   assert.equal(debt.paymentStatus, 'unpaid');

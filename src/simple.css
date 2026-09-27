@@ -1,0 +1,69 @@
+/* Clear actions, fewer competing panels, and touch-friendly controls. */
+:root { --muted: #606e69; }
+.simple-home { display: grid; gap: 24px; max-width: 960px; }
+.quick-create { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.quick-create > button { display: flex; align-items: center; gap: 16px; padding: 24px; text-align: left; border: 1px solid #d2dfd5; border-radius: 14px; background: #edf4e9; color: var(--green); }
+.quick-create > button:hover { background: #e1edda; }
+.quick-create > button > span { flex: 1; min-width: 0; }
+.quick-create strong, .quick-create small { display: block; }
+.quick-create strong { font-size: 1.05rem; }
+.quick-create small { margin-top: 7px; line-height: 1.5; }
+.simple-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.simple-totals button { text-align: left; background: white; border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; color: var(--green); }
+.simple-totals button[aria-pressed=true] { border-color: #6d9073; box-shadow: inset 0 0 0 1px #6d9073; }
+.simple-totals span { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: #5e7065; }
+.simple-totals strong { display: block; font-size: clamp(1.3rem, 3vw, 2rem); margin-top: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.approval-card { border-color: #c6bada; background: #fdfbff; }
+.payment-row-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 0 0 8px 52px; }
+.payment-row-actions .button { margin-left: auto; }
+.payment-row-actions small { flex-basis: 100%; }
+.payment-amount { font-size: 2rem; font-weight: 650; color: var(--green); margin: 12px 0 20px; overflow-wrap: anywhere; }
+.optional-fields > summary { cursor: pointer; font-size: .95rem; font-weight: 600; color: var(--green); line-height: 1.6; }
+.optional-fields > summary span { display: block; font-weight: 400; font-size: .8rem; color: var(--muted); padding-left: 18px; }
+.optional-fields[open] > summary { margin-bottom: 22px; }
+.optional-fields:not(.card) { margin: 20px 0; }
+.optional-fields > label { margin-top: 14px; }
+details.item-options { display: block; }
+.item-options summary { cursor: pointer; color: #65765f; font-size: .75rem; padding: 6px 0; }
+.item-options[open] .checkbox-label { margin: 12px 0; }
+.equal-all { background: #edf4e9; border-color: #c4d5b8; color: var(--green); width: 100%; margin: 0 0 12px; }
+.allocation-person { min-width: 0; }
+.allocation-person > span { overflow-wrap: anywhere; }
+.quantity-stepper { display: flex; align-items: center; flex-shrink: 0; gap: 2px; }
+.quantity-stepper button { min-width: 40px; min-height: 44px; border-radius: 8px; background: #eef3e9; color: var(--green); font-size: 1.2rem; }
+.quantity-stepper input { width: 62px; padding: 8px 2px; appearance: textfield; -moz-appearance: textfield; }
+.quantity-stepper input::-webkit-inner-spin-button, .quantity-stepper input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.optional-breakdown { margin: 18px 0; }
+.optional-breakdown summary { cursor: pointer; font-size: .85rem; color: var(--green); padding: 8px 0; }
+.optional-breakdown[open] summary { margin-bottom: 15px; }
+.tabs button { min-height: 44px; color: #617169; }
+.footnote { color: #677660; }
+.mobile-editor-action { display: none; }
+@media (max-width: 720px) {
+  .simple-home { gap: 16px; }
+  .quick-create { gap: 10px; }
+  .quick-create > button { padding: 18px 14px; gap: 10px; align-items: flex-start; }
+  .quick-create > button > svg:last-child { display: none; }
+  .quick-create strong { font-size: .9rem; }
+  .quick-create small { font-size: .75rem; }
+  .simple-totals { gap: 10px; }
+  .simple-totals button { padding: 18px 14px; }
+  .simple-totals span { font-size: .78rem; }
+  .simple-totals strong { font-size: 1.35rem; }
+  .payment-row-actions { padding-left: 0; }
+  .payment-row-actions .button { font-size: .8rem; }
+  .payment-row-actions .badge { white-space: normal; }
+  .notice { flex-wrap: wrap; }
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .form-grid input, .form-grid select, input, select, textarea { font-size: 16px; }
+  .editor-steps { position: sticky; top: 0; z-index: 5; background: #f6f7f9; padding: 12px 0; }
+  .mobile-editor-action { position: sticky; bottom: calc(72px + env(safe-area-inset-bottom)); z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; margin: 18px -6px 0; background: white; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 4px 18px #123e3514; }
+  .mobile-editor-action > span { font-size: .7rem; color: var(--muted); }
+  .mobile-editor-action strong { display: block; margin-top: 5px; font-size: .9rem; color: var(--green); }
+  .mobile-editor-action .button { padding: 10px 12px; font-size: .8rem; }
+}
+@media (max-width: 380px) {
+  .quick-create > button > svg { display: none; }
+  .simple-totals strong { font-size: 1.15rem; }
+  .allocation-person .avatar { display: none; }
+}

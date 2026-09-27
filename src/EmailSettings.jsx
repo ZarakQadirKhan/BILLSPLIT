@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { request } from './api.js';
 
-export default function EmailSettings({ user, onUpdated }) {
+export default function EmailSettings({ user, delivery, onUpdated }) {
   const [code, setCode] = useState(''), [message, setMessage] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   async function run(path, body, success) {
     setBusy(true); setError(''); setMessage('');
@@ -9,6 +9,8 @@ export default function EmailSettings({ user, onUpdated }) {
     catch (e) { setError(e.message); } finally { setBusy(false); }
   }
   return <section className="profile-recovery"><h3>Email notifications</h3>
+    {delivery?.issue && <p className="notice" role="status">{delivery.issue === 'authentication' ? 'The Gmail sender could not sign in. The app owner needs to check the sender address and App Password in Vercel.' : delivery.issue === 'connection' ? 'The app could not connect to the email server. Your email is queued for another attempt.' : 'Email delivery is delayed. The app owner can check the safe delivery logs.'} Your bill and payment records are unaffected.</p>}
+    {!delivery?.issue && delivery?.queued > 0 && <p className="muted" role="status">Email queued. Delivery has not been confirmed yet. Check your inbox and spam folder.</p>}
     {!user.emailConfigured && <p className="notice">Email delivery is not configured yet. The app owner needs to connect the Gmail sender. In-app balances and payment approval still work.</p>}
     {!user.email ? <p className="muted">Save your email address above to receive bill and payment updates.</p> : user.emailVerified ? <p className="settled-message">Verified: {user.email}</p> : <>
       <p className="muted">Verify {user.email} to receive bill shares and payment updates. Save any email changes before requesting a code.</p>

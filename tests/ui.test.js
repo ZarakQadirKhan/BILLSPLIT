@@ -32,6 +32,13 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
     fireEvent.click(screen.getByRole('button',{name:'Share equally'}));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    fireEvent.click(screen.getByRole('button',{name:'Remove one Dinner plates from Sara'}));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
+    fireEvent.click(screen.getByRole('button',{name:'Add one Dinner plates to Sara'}));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    dom.window.confirm = () => true;
+    fireEvent.click(screen.getByRole('button',{name:'Split all items equally'}));
+    assert.equal(screen.getByLabelText('Dinner plates quantity for Sara').value,'1');
     fireEvent.change(screen.getByLabelText('Final charged amount'),{target:{value:'20050'}});
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
     fireEvent.click(screen.getByRole('button',{name:'Add an explicit adjustment'}));
@@ -49,6 +56,23 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.equal(screen.getByRole('button',{name:'Send ride shares'}).disabled,true,'unconfigured payer is flagged');
     fireEvent.click(screen.getByRole('button',{name:/Ali/}));
     assert.match(screen.getByTestId('ride-to-collect').textContent,/0.00/);
+    cleanup();
+    const { default:HomeOverview } = await vite.ssrLoadModule('/src/HomeOverview.jsx');
+    let selectedAction;
+    const waiting={id:'pending',bill_id:'bill',debtor_id:'sara',creditor_id:'ali',amount:20000,status:'marked_paid'};
+    render(React.createElement(HomeOverview,{debts:[waiting],user,person:pid=>pid==='ali'?user:sara,bills:[{id:'bill',title:'Test ride'}],onOpen(){},onAction:(d,a)=>selectedAction=a,onCreate(){},onBills(){}}));
+    assert.ok(screen.getByRole('heading',{name:'Did these payments arrive?'}));
+    fireEvent.click(screen.getByRole('button',{name:'Confirm received'}));
+    assert.equal(selectedAction,'confirm');
+    assert.ok(screen.getByRole('heading',{name:'Nothing to pay'}));
+    cleanup();
+    const { PaymentModal } = await vite.ssrLoadModule('/src/ui.jsx');
+    let submitted = false;
+    render(React.createElement(PaymentModal,{modal:{debt:waiting,action:'confirm'},person:pid=>pid==='ali'?user:sara,onClose(){},onSubmit:async()=>{submitted=true;}}));
+    assert.equal(submitted,false,'opening confirmation never changes financial status');
+    assert.ok(screen.getByText(/Check your bank, wallet or cash/));
+    await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Yes, I received the money'})));
+    assert.equal(submitted,true);
     cleanup();
 
     // Verify the onboarding and dashboard use the real profile response.

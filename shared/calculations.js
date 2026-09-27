@@ -102,6 +102,7 @@ export function validateBill(bill) {
   if (!str(bill.title, 120) || !bill.title.trim()) throw Error('Give your bill a name.');
   if (!str(bill.date, 10) || !/^\d{4}-\d{2}-\d{2}$/.test(bill.date)) throw Error('Enter a valid date.');
   if (!Array.isArray(bill.participants) || !bill.participants.length || bill.participants.length > 50 || new Set(bill.participants).size !== bill.participants.length) throw Error('Choose 1–50 unique participants.');
+  if (bill.participants.some(person => !str(person, 100) || !person) || !str(bill.paidBy, 100)) throw Error('Choose valid participants.');
   if (!bill.participants.includes(bill.paidBy)) throw Error('The payer must be a participant.');
   if (!Array.isArray(bill.items) || bill.items.length > 200) throw Error('A bill can contain up to 200 items.');
   const ids = new Set();
@@ -122,5 +123,13 @@ export function validateBill(bill) {
   if (!['equal', 'proportional'].includes(bill.chargeSplit) || (bill.receiptTotalCents != null && !cents(bill.receiptTotalCents))) throw Error('Invalid total or fee split.');
   const result = calculate(bill);
   if (!Number.isSafeInteger(result.total) || result.total > 10000000000 || result.subtotal > 10000000000) throw Error('Bill total is too large.');
-  return bill;
+  // Only persist the reviewed bill fields, never client metadata or image blobs.
+  const stored = Object.fromEntries(Object.keys(newBill(bill.paidBy)).map(key => [key, bill[key]]));
+  stored.kind = bill.kind || 'food';
+  stored.receiptId = null;
+  if (bill.kind === 'ride') stored.fareCents = bill.fareCents;
+  stored.items = bill.items.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, unitPriceCents: item.unitPriceCents, lineTotalCents: item.lineTotalCents ?? null, eligible: item.eligible !== false, allocations: item.allocations.map(({ personId, quantity }) => ({ personId, quantity })) }));
+  stored.discount = Object.fromEntries(['type', 'rate', 'amountCents', 'eligibleCapCents', 'maxDiscountCents'].map(key => [key, bill.discount[key]]));
+  stored.tax = Object.fromEntries(['type', 'rate', 'amountCents', 'basis'].map(key => [key, bill.tax[key]]));
+  return stored;
 }

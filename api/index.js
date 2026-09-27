@@ -1,4 +1,5 @@
 import express from 'express';
+import { waitUntil } from '@vercel/functions';
 import { createApi } from '../server/api.js';
 
 const app = express();
@@ -12,7 +13,7 @@ app.use((req, res, next) => {
 });
 let ready;
 function getApi() {
-  if (!ready) ready = createApi(undefined, { requireRemote: true }).catch(error => { ready = null; throw error; });
+  if (!ready) ready = createApi(undefined, { background: waitUntil }).catch(error => { ready = null; throw error; });
   return ready;
 }
 app.use('/api', async (req, res, next) => {

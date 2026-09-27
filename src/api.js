@@ -5,7 +5,6 @@ export async function request(path, options = {}) {
   if (!response.ok) { const data = await response.json().catch(() => ({})); const error = Error(data.error || 'Could not connect. Your unsaved changes are still here.'); error.status = response.status; throw error; }
   return response.json();
 }
-export async function receiptUrl(id) { const response = await fetch(`/api/receipts/${id}`, { headers: { Authorization: `Bearer ${token()}` } }); if (!response.ok) throw Error('Could not load this receipt.'); return URL.createObjectURL(await response.blob()); }
 export function saveSession(value) { localStorage.setItem('tab-together-session', value); }
 export async function prepareImage(file) {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw Error('Choose a JPG, PNG, or WebP receipt.');

@@ -1,91 +1,73 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { mkdirSync } from 'node:fs';
+import { MongoClient } from 'mongodb';
 
-// Same schema locally and on Turso; existing local records remain compatible.
-export const schema = [
-  "CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, name TEXT NOT NULL, claimed INTEGER NOT NULL DEFAULT 0, payment_details TEXT NOT NULL DEFAULT '', recovery_hash TEXT UNIQUE, created_at TEXT NOT NULL)",
-  'CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id))',
-  'CREATE TABLE IF NOT EXISTS contacts(owner_id TEXT NOT NULL REFERENCES users(id), person_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(owner_id, person_id))',
-  'CREATE TABLE IF NOT EXISTS invitations(token_hash TEXT PRIMARY KEY, person_id TEXT NOT NULL REFERENCES users(id), owner_id TEXT NOT NULL REFERENCES users(id))',
-  'CREATE TABLE IF NOT EXISTS bills(id TEXT PRIMARY KEY, creator_id TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL, data TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS members(bill_id TEXT NOT NULL REFERENCES bills(id), user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(bill_id,user_id))',
-  "CREATE TABLE IF NOT EXISTS debts(id TEXT PRIMARY KEY, bill_id TEXT NOT NULL REFERENCES bills(id), debtor_id TEXT NOT NULL REFERENCES users(id), creditor_id TEXT NOT NULL REFERENCES users(id), amount INTEGER NOT NULL, status TEXT NOT NULL, reference TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL)",
-  'CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), bill_id TEXT, message TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS receipts(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), content_type TEXT NOT NULL, bytes BLOB NOT NULL)',
-  'CREATE TABLE IF NOT EXISTS rate_limits(key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL)',
-  'CREATE INDEX IF NOT EXISTS idx_members_user ON members(user_id)',
-  'CREATE INDEX IF NOT EXISTS idx_debts_debtor ON debts(debtor_id)',
-  'CREATE INDEX IF NOT EXISTS idx_debts_creditor ON debts(creditor_id)',
-  'CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id,created_at)',
-];
+export const collections = ['users', 'sessions', 'contacts', 'invitations', 'bills', 'debts', 'events', 'rate_limits', 'email_outbox'];
 
-export async function openDatabase(directory, options = {}) {
-  const url = options.url ?? process.env.TURSO_DATABASE_URL;
-  const authToken = options.authToken ?? process.env.TURSO_AUTH_TOKEN;
-  const cloudRequired = options.requireRemote ?? !!process.env.VERCEL;
-  let client = options.client, sqlite;
-  if (!client && url) {
-    if (!authToken || !/^(libsql|https):\/\//.test(url)) throw Error('Set a valid TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.');
-    const { createClient } = await import('@libsql/client/web');
-    client = createClient({ url, authToken });
-  } else if (!client) {
-    if (cloudRequired) throw Error('Persistent database missing: configure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Vercel.');
-    const { DatabaseSync } = await import('node:sqlite');
-    mkdirSync(directory, { recursive: true });
-    sqlite = new DatabaseSync(`${directory}/tab-together.sqlite`);
-    sqlite.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
-  }
-  if (client) await client.batch(schema, 'write');
-  else sqlite.exec(schema.join(';') + '; PRAGMA optimize;');
+export async function openDatabase(_directory, options = {}) {
+  const uri = options.uri ?? process.env.MONGODB_URI;
+  if (!uri) throw Error('Persistent database missing: set MONGODB_URI in your private environment settings.');
+  if (!/^mongodb(\+srv)?:\/\//.test(uri)) throw Error('MONGODB_URI must be a MongoDB connection string.');
+  const client = new MongoClient(uri, { maxPoolSize: 5, minPoolSize: 0, maxIdleTimeMS: 60000, serverSelectionTimeoutMS: 8000 });
+  try {
+    await client.connect();
+    const mongo = client.db(options.databaseName ?? process.env.MONGODB_DB ?? 'tab_together');
+    for (const name of collections) await mongo.collection(name).createIndex({ id: 1 }, { unique: true });
+    await mongo.collection('users').createIndex({ username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } });
+    await mongo.collection('users').createIndex({ recovery_hash: 1 }, { unique: true, partialFilterExpression: { recovery_hash: { $type: 'string' } } });
+    await mongo.collection('contacts').createIndex({ owner_id: 1, person_id: 1 }, { unique: true });
+    await mongo.collection('invitations').createIndex({ person_id: 1 }, { unique: true });
+    await mongo.collection('bills').createIndex({ creator_id: 1, created_at: -1 });
+    await mongo.collection('bills').createIndex({ participants: 1, status: 1 });
+    await mongo.collection('debts').createIndex({ bill_id: 1, debtor_id: 1 }, { unique: true });
+    await mongo.collection('debts').createIndex({ creditor_id: 1, status: 1 });
+    await mongo.collection('debts').createIndex({ debtor_id: 1, status: 1 });
+    await mongo.collection('events').createIndex({ user_id: 1, created_at: -1 });
+    await mongo.collection('rate_limits').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+    await mongo.collection('email_outbox').createIndex({ status: 1, retry_at: 1, lease_until: 1 });
+    await mongo.collection('email_outbox').createIndex({ user_id: 1, status: 1 });
+    await mongo.collection('email_outbox').createIndex({ delete_after: 1 }, { expireAfterSeconds: 0 });
+    await mongo.collection('mail_control').updateOne({ _id: 'budget' }, { $setOnInsert: { attempts: [] } }, { upsert: true });
 
-  const context = new AsyncLocalStorage();
-  let tail = Promise.resolve();
-  // A local connection cannot interleave another request into an awaited transaction.
-  function exclusive(fn) {
-    const result = tail.then(fn);
-    tail = result.catch(() => {});
-    return result;
-  }
-  async function query(kind, sql, args) {
-    const transaction = context.getStore();
-    const execute = async () => {
-      if (client) {
-        const result = await (transaction || client).execute({ sql, args });
-        return kind === 'get' ? result.rows[0] : kind === 'all' ? result.rows : { changes: result.rowsAffected };
-      }
-      return sqlite.prepare(sql)[kind](...args);
-    };
-    return sqlite && !transaction ? exclusive(execute) : execute();
-  }
-  return {
-    kind: client ? 'turso' : 'sqlite',
-    get: (sql, ...args) => query('get', sql, args),
-    all: (sql, ...args) => query('all', sql, args),
-    run: (sql, ...args) => query('run', sql, args),
-    async batch(statements) {
-      const tx = context.getStore();
-      const execute = async () => {
-        if (client) return (tx || client).batch(statements, ...(tx ? [] : ['write']));
-        for (const { sql, args = [] } of statements) sqlite.prepare(sql).run(...args);
-      };
-      return sqlite && !tx ? exclusive(execute) : execute();
-    },
-    async transaction(fn, mode = 'write') {
-      if (context.getStore()) return fn();
-      const execute = async () => {
-        const tx = client ? await client.transaction(mode) : { local: true };
-        if (sqlite) sqlite.exec(mode === 'write' ? 'BEGIN IMMEDIATE' : 'BEGIN');
+    const context = new AsyncLocalStorage();
+    const settings = extra => ({ ...extra, ...(context.getStore() ? { session: context.getStore() } : {}) });
+    return {
+      kind: 'mongodb',
+      one: (name, filter) => mongo.collection(name).findOne(filter, settings({ projection: { _id: 0 } })),
+      many: (name, filter = {}, extra = {}) => mongo.collection(name).find(filter, settings({ projection: { _id: 0 }, ...extra })).toArray(),
+      insert: (name, doc) => mongo.collection(name).insertOne({ ...doc }, settings()),
+      insertMany: (name, docs) => mongo.collection(name).insertMany(docs.map(doc => ({ ...doc })), settings()),
+      update: (name, filter, update, extra) => mongo.collection(name).updateOne(filter, update, settings(extra)),
+      updateMany: (name, filter, update) => mongo.collection(name).updateMany(filter, update, settings()),
+      remove: (name, filter) => mongo.collection(name).deleteMany(filter, settings()),
+      claimEmail: () => mongo.collection('email_outbox').findOneAndUpdate({ $or: [{ status: 'pending', retry_at: { $lte: new Date() } }, { status: 'sending', lease_until: { $lt: new Date() } }] }, { $set: { status: 'sending', lease_until: new Date(Date.now() + 60000) }, $inc: { attempts: 1 } }, { returnDocument: 'after', sort: { created_at: 1 }, projection: { _id: 0 } }),
+      async reserveEmailAttempt(limit) {
+        const cutoff = new Date(Date.now() - 86400000);
+        const row = await mongo.collection('mail_control').findOneAndUpdate({ _id: 'budget' }, [
+          { $set: { attempts: { $filter: { input: '$attempts', as: 'time', cond: { $gt: ['$$time', cutoff] } } } } },
+          { $set: { permitted: { $lt: [{ $size: '$attempts' }, limit] } } },
+          { $set: { attempts: { $cond: ['$permitted', { $concatArrays: ['$attempts', [new Date()]] }, '$attempts'] } } },
+        ], { returnDocument: 'after' });
+        return row.permitted;
+      },
+      async rateLimit(key) {
+        const time = Date.now(), id = key + ':' + Math.floor(time / 60000);
+        // Fixed one-minute windows with TTL cleanup; never store raw IP addresses.
         try {
-          const value = await context.run(tx, fn);
-          if (client) await tx.commit(); else sqlite.exec('COMMIT');
-          return value;
+          return await mongo.collection('rate_limits').findOneAndUpdate({ id }, { $inc: { count: 1 }, $setOnInsert: { expires_at: new Date(time + 120000) } }, { upsert: true, returnDocument: 'after' });
         } catch (error) {
-          try { if (client) await tx.rollback(); else sqlite.exec('ROLLBACK'); } catch { /* preserve the original error */ }
-          throw error;
-        } finally { if (client) tx.close(); }
-      };
-      return sqlite ? exclusive(execute) : execute();
-    },
-    async close() { await tail; if (client) client.close(); else sqlite.close(); },
-  };
+          if (error.code !== 11000) throw error;
+          return mongo.collection('rate_limits').findOneAndUpdate({ id }, { $inc: { count: 1 } }, { returnDocument: 'after' });
+        }
+      },
+      async transaction(fn) {
+        if (context.getStore()) return fn();
+        const session = client.startSession();
+        try {
+          return await session.withTransaction(() => context.run(session, fn), { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' }, readPreference: 'primary', timeoutMS: 15000 });
+        } finally { await session.endSession(); }
+      },
+      health: () => mongo.command({ ping: 1 }),
+      close: () => client.close(),
+    };
+  } catch (error) { await client.close(); throw error; }
 }

@@ -1,48 +1,80 @@
-# Deploy on Vercel without paid services
+# Deploy for $0: Vercel Hobby + MongoDB Atlas Free
 
-This project is prepared for **Vercel Hobby + Turso Free**. The frontend and API live on Vercel; persistent bills, profiles, payment details, receipts, and notifications live in Turso. Local development still uses the existing SQLite file unless Turso variables are configured.
+The app records payments, but never transfers money. OCR runs on-device without paid APIs; receipt photos are not uploaded. Deploying requires your own accounts. No cloud resources are created by building or testing the code.
 
-No Vercel or Turso resource is created by building this code. Deployment needs your account access and database settings. Do not put credentials in GitHub or chat messages.
+## 1. Create the free database
 
-## Free-plan setup
+1. Sign in at [MongoDB Atlas](https://cloud.mongodb.com/). Create a project called **BILLSPLIT**.
+2. Choose **Create → Free / M0**, confirming the price is **$0**. Do not select Flex, a dedicated paid cluster, or paid add-ons. Choose an available nearby region and name the cluster **billsplit**. Skip sample datasets.
+3. Create a **database user** with a generated strong password. This is separate from both your Atlas login and app users. Restrict its role to **readWrite** on database **tab_together**.
+4. For local setup, add only your current IP under **Network Access**.
+5. Open the cluster's **Connect → Drivers → Node.js** instructions. Copy the connection string into your private environment settings, substituting the database user's password (URL-encode special characters). Never paste it in chat or commit it to GitHub.
 
-1. In [Turso](https://turso.tech/), sign in and create a database on the **Free** plan. Do not upgrade or enable paid overages. The published Free plan currently requires no credit card and includes 5 GB storage. Free limits can change; check [current pricing](https://turso.tech/pricing).
-2. Copy the database's `libsql://...` URL and create a database access token. These are server secrets.
-3. In [Vercel](https://vercel.com/new), select your **Hobby** account and import `ZarakQadirKhan/BILLSPLIT`. This friends-only personal app fits Hobby's non-commercial purpose. Avoid a Pro trial or paid add-ons. Hobby limits can pause service; see [Hobby plan details](https://vercel.com/docs/plans/hobby).
-4. Keep the project root at the repository root. Framework: **Vite**. Build command: **npm run build**. Output directory: **dist**. Use Node.js **24.x** in project settings.
-5. Add these environment variables in Vercel for **Production**:
+Official instructions: [create a Free cluster](https://www.mongodb.com/docs/atlas/tutorial/deploy-free-tier-cluster/), [database users](https://www.mongodb.com/docs/atlas/security-add-mongodb-users/), [IP access lists](https://www.mongodb.com/docs/atlas/security/ip-access-list/).
 
-   | Name | Value |
+### Vercel connectivity needs a separate network decision
+
+Adding your laptop's IP does not allow Vercel's servers. Vercel Hobby does not provide a dedicated static outbound IP. A commonly used no-cost Atlas setup allows `0.0.0.0/0` (connections from any IP), while still requiring TLS and database credentials. This broadens network exposure: approve it explicitly before changing the allowlist, use a dedicated strong-password user scoped only to this app's database, and never expose its URI in frontend code. Do not enable paid static IP/private networking to work around this without discussing the cost.
+
+## 2. Configure Vercel
+
+1. On [Vercel New Project](https://vercel.com/new), use your **Hobby** account and import **ZarakQadirKhan/BILLSPLIT**.
+2. Framework **Vite**; repository root; build **npm run build**; output **dist**; Node.js **24.x**.
+3. Add server-only environment variables for **Production**:
+
+   | Variable | Value |
    | --- | --- |
-   | `TURSO_DATABASE_URL` | Your database's `libsql://...` URL |
-   | `TURSO_AUTH_TOKEN` | Your database access token |
+   | `MONGODB_URI` | Private Atlas connection string |
+   | `MONGODB_DB` | `tab_together` |
 
-   Never use a `VITE_` prefix for these secrets. Add preview variables only if preview deployments should connect to the chosen database; a separate free test database is preferable for previews.
-6. Deploy. Use the included `.vercel.app` address, so a custom domain is not needed.
-7. Open `/api/health` on the deployed address. It should return `{"ok":true,"database":"turso"}`. Then test the complete two-person flow: invite a friend, send a ride or food bill, mark paid, and confirm receipt. Refresh or reopen on another device to confirm data persists.
+   Do not use a `VITE_` prefix. Preview deployments should use a separate test database and restricted database user, not the production database.
+4. Ensure Atlas network access allows the deployment as agreed above.
+5. Deploy using the included **.vercel.app** address; no purchased domain is needed.
+6. Verify **/api/health** returns `{"ok":true,"database":"mongodb"}`. Test two separate browser profiles: invite, split a bill/ride, mark paid, confirm received, and reopen to verify persistence.
 
-`vercel.json` configures the API route and frontend output. The API creates missing tables automatically using idempotent schema statements. It fails with an explicit error when cloud database variables are absent; it never silently saves bills in a temporary Vercel file.
+The function reuses its MongoDB connection pool (maximum five application connections per instance). Database indexes are created automatically. Missing credentials fail explicitly; nothing is written to Vercel's ephemeral filesystem. Pushing GitHub changes redeploys only after Vercel has been connected.
 
-## Existing local accounts and bills
+## 3. Set up the free Gmail sender
 
-Publishing the source does **not** copy your local database. Choose between a fresh online database and migrating existing records. To preserve existing accounts, stop the local app and back up `data/`, then create a private `.env.local` containing the two Turso variables and run:
+1. Create or choose a dedicated **free personal Gmail account** for this app. Google Workspace is not required. Do not use your normal account password in the app.
+2. Enable [Google 2-Step Verification](https://myaccount.google.com/security), then create an [App Password](https://myaccount.google.com/apppasswords) named **Tab Together**. Google explains [App Password eligibility and restrictions](https://support.google.com/accounts/answer/185833). If the option is unavailable, stop and check account eligibility rather than disabling security.
+3. Save these in **Vercel → Project Settings → Environment Variables → Production**, then redeploy:
+
+   | Variable | Value |
+   | --- | --- |
+   | `GMAIL_USER` | The dedicated sender's Gmail address |
+   | `GMAIL_APP_PASSWORD` | The generated App Password, without display spaces |
+   | `APP_BASE_URL` | Your exact HTTPS `.vercel.app` origin, with no trailing slash |
+
+   These are server-only secrets. Do not paste the App Password into chat or GitHub. Use the same private `.env.local` variables if testing locally; use `http://localhost:5173` for local email links.
+4. In the app, save your recipient email in Profile and choose **Send a new code**. Enter the code from Gmail (check spam too). Test with two verified users: a new share sends an owed email; **I’ve paid** sends an approval request to the recipient; **Confirm received** sends confirmation to both people and marks the debt paid.
+
+Google documents a [personal Gmail sending limit](https://support.google.com/mail/answer/22839). This app caps itself more conservatively at **100 attempts in a rolling 24 hours**, including verification and failed attempts. Extra notifications stay queued. No paid sending plan or purchased domain is needed for this setup. Gmail can still block a login from a new server, throttle, or classify mail as spam; successful real delivery must be tested after configuration.
+
+Emails are recorded transactionally in MongoDB, and Vercel `waitUntil` continues sending after the HTTP response. A failed email never reverses a payment update. Automatic retries happen during subsequent app requests; there is no paid queue worker or scheduled always-on retry service. The app shows failed-delivery warnings and supports a manual retry in Profile. Sent/canceled records expire via TTL indexes. SMTP cannot guarantee exactly-once delivery if a connection fails after a provider accepted a message.
+
+Users must verify their email before receiving financial notifications and can opt out in Profile. Verification is not account recovery: users must keep their recovery code. Approval links require the recipient's saved session or recovery code and never change debt status through a GET request.
+
+## 4. Optional: preserve existing local accounts
+
+A source-code push does not migrate your previous SQLite records. The old database and photos remain untouched. Choose a fresh online start or migrate **before anyone uses the online app**:
+
+1. Stop the old app and back up the complete `data/` directory.
+2. Create a private `.env.local` containing the MongoDB variables above.
+3. Use a new **empty** destination database and run:
 
 ```sh
-node --env-file=.env.local scripts/migrate-to-turso.mjs --confirm
+node --env-file=.env.local scripts/migrate-to-mongodb.mjs --confirm
 ```
 
-The destination must be empty. The script refuses to merge with existing online records, leaves the local file untouched, and verifies table counts. It prints no account or payment details. It uses bounded transactions; if migration fails after copying some records, use a **new empty destination database** and retry instead of rerunning against the partial destination. Existing large receipts can exceed cloud request limits; the original files remain safe locally if a migration fails.
+Migration runs in a transaction and refuses nonempty destinations. Profiles, sessions, invitations, bills, debts and activity are preserved; photo bytes are deliberately skipped. Existing profiles receive deterministic unique usernames beginning with `user_`, which they can change in Profile. Recovery codes remain valid. A new website origin does not inherit your browser session: use your saved recovery code. Replace localhost in old invitation links with the online address.
 
-The online address is a different browser origin, so use your existing recovery code to access a migrated profile. Invitation links created at localhost need their host replaced by the deployed address; private invitation tokens remain the same.
+No migration is run automatically. The script prints counts, not private data. Back up the hosted data periodically; Atlas Free has no automatic backups.
 
-## Operational notes
+## Cost and scope
 
-- Vercel's filesystem is ephemeral. A local SQLite file is not a production database there; [Vercel explains why](https://vercel.com/kb/guide/is-sqlite-supported-in-vercel).
-- Receipt images are resized and compressed on-device to at most 2 MB, below [Vercel's 4.5 MB function limit](https://vercel.com/docs/errors/function_payload_too_large), then stored in the authorized database. The client supports common JPG, PNG, and WebP inputs.
-- OCR still runs in the browser. The build copies its worker, WASM, and English data into static assets. There are no OCR or LLM API charges.
-- Activity refreshes every 30 seconds while visible, reducing requests. In-app notifications work across devices; there is no email, SMS, or background push provider.
-- Database transactions protect concurrent updates and duplicate payment confirmations. Auth rate limits use the shared database rather than temporary server memory.
-- Turso credentials stay server-side. Keep paid overages off and remain on Vercel Hobby to preserve the zero-spending constraint. The app cannot enforce your hosting account's billing settings.
-- Source pushes trigger redeployment only after Vercel is connected to the repository.
+Use only **Vercel Hobby**, **Atlas Free**, and a **free personal Gmail sender**. No payment gateway, SMS, paid email provider, paid OCR or LLM is configured. Free services have usage/storage limits and can pause or throttle; the code cannot control account upgrades or provider policy changes. Do not accept paid trials or add-ons.
 
-Free-plan information was checked against the official documentation on September 27, 2026.
+The current Atlas Free storage limit is 512 MB including indexes. Photos are not stored, leaving space for bill records. Notifications refresh in-app every 30 seconds while visible; there is no background push. Actual payments take place through cash, bank or wallet outside this app. Only recipient confirmation changes a debt to paid.
+
+Sources: [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Atlas Free limits](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/). Account setup and a successful deployed smoke test are required before claiming the app is live.

@@ -64,6 +64,8 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
       render(React.createElement(App));
       await act(async()=>{});
       fireEvent.change(screen.getByLabelText('Your name'),{target:{value:'Ali'}});
+      fireEvent.change(screen.getByLabelText('Username'),{target:{value:'Ali_123'}});
+      fireEvent.change(screen.getByLabelText('Email address'),{target:{value:'ali@example.test'}});
       await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Create my profile'})));
       assert.ok(screen.getByRole('heading',{name:'Hey, Ali.'}));
       assert.ok(screen.getByRole('heading',{name:'Keep your recovery code safe'}));

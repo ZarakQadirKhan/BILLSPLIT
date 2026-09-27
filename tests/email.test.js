@@ -1,0 +1,77 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
+import { createApi } from '../server/api.js';
+import { newRideBill } from '../shared/calculations.js';
+
+test('verified email notifications follow owed → pending approval → confirmed, with durable retries', async t => {
+  const replica = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  const sent = []; let failSending = false;
+  const transport = { async sendMail(message) { if (failSending) throw Error('Simulated SMTP outage'); sent.push(message); return { messageId: message.messageId }; } };
+  const { api, db, mail } = await createApi(undefined, { uri: replica.getUri(), databaseName: 'email_test', mail: { enabled: true, from: 'sender@example.test', baseUrl: 'https://bill.example.test', transport } });
+  const app = express(); app.use('/api', api);
+  const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await db.close(); await replica.stop(); });
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  async function call(route, token, body, method = body ? 'POST' : 'GET') {
+    const response = await fetch(base + route, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    return { status: response.status, data: await response.json() };
+  }
+  const a = (await call('/register', null, { name: 'Ali', username: 'ali', email: 'ali@example.test' })).data;
+  assert.equal(a.user.emailVerified, false);
+  const codeA = sent.at(-1).text.match(/code is (\d{6})/)[1];
+  assert.equal((await call('/email/resend', a.token, {})).status, 429, 'resend cooldown prevents mail spam');
+  assert.equal((await call('/email/verify', a.token, { code: 'wrong' })).status, 400);
+  assert.equal((await db.one('users', { id: a.user.id })).email_code_attempts, 1, 'invalid attempt is committed');
+  assert.equal((await call('/email/verify', a.token, { code: codeA })).data.user.emailVerified, true);
+  const b = (await call('/register', null, { name: 'Sara', username: 'sara', email: 'sara@example.test' })).data;
+  const codeB = sent.at(-1).text.match(/code is (\d{6})/)[1];
+  assert.equal((await call('/email/verify', b.token, { code: codeB })).status, 200);
+  const friend = (await call('/friends', a.token, { name: 'Sara' })).data;
+  assert.equal((await call(`/invite/${friend.inviteToken}/claim`, b.token, {})).status, 200);
+  await call('/profile', a.token, { name: 'Ali', username: 'ali', paymentDetails: 'Pay outside the app' }, 'PATCH');
+  const ride = newRideBill(a.user.id); ride.participants = [a.user.id, b.user.id]; ride.fareCents = 100000;
+  const saved = (await call('/bills', a.token, { bill: ride })).data;
+  failSending = true;
+  assert.equal((await call(`/bills/${saved.id}/publish`, a.token, { version: saved.version })).status, 200, 'SMTP failure cannot undo the bill');
+  const queued = (await db.many('email_outbox', { kind: 'owed' }))[0];
+  assert.equal(queued.status, 'pending');
+  failSending = false;
+  await db.update('email_outbox', { id: queued.id }, { $set: { retry_at: new Date(0) } });
+  await Promise.all([mail.flush(), mail.flush()]);
+  assert.equal(sent.filter(m => m.subject.includes('new bill share')).length, 1, 'concurrent flushes cannot double-send');
+  assert.equal(sent.at(-1).to, 'sara@example.test'); assert.match(sent.at(-1).text, /500\.00/);
+  assert.match(sent.at(-1).text, new RegExp(`#bill=${saved.id}`));
+  const state = (await call('/state', b.token)).data, debt = state.debts[0];
+  assert.equal(debt.paymentStatus, 'unpaid');
+  assert.ok(state.people.every(p => !('email' in p) && !('email_code_hash' in p)), 'friends cannot see private email data');
+  assert.equal((await call(`/debts/${debt.id}/action`, a.token, { action: 'paid' })).status, 403);
+  assert.equal((await call(`/debts/${debt.id}/action`, b.token, { action: 'paid' })).data.paymentStatus, 'pending_confirmation');
+  assert.equal(sent.at(-1).to, 'ali@example.test'); assert.match(sent.at(-1).subject, /please confirm receipt/);
+  assert.match(sent.at(-1).text, /Check your bank/);
+  assert.equal((await call(`/debts/${debt.id}/action`, b.token, { action: 'confirm' })).status, 403);
+  assert.equal((await call(`/debts/${debt.id}/action?confirm=true`, a.token)).status, 404, 'GET links never approve payments');
+  const countBefore = sent.length;
+  assert.equal((await call(`/debts/${debt.id}/action`, a.token, { action: 'confirm' })).data.paymentStatus, 'paid');
+  assert.equal(sent.length, countBefore + 2, 'both sides receive confirmation');
+  assert.deepEqual(sent.slice(-2).map(m => m.to).sort(), ['ali@example.test', 'sara@example.test']);
+  assert.ok(sent.slice(-2).every(m => m.subject.includes('Payment confirmed')));
+  for (const token of [a.token, b.token]) assert.equal((await call('/state', token)).data.debts[0].paymentStatus, 'paid');
+  assert.equal((await call(`/debts/${debt.id}/action`, a.token, { action: 'confirm' })).status, 409);
+  assert.equal(sent.length, countBefore + 2, 'repeated confirmation sends no extra email');
+  // Changing an address revokes verification; a queued debt email to the old address is canceled.
+  await mail.queueDebt('confirmed', await db.one('debts', { id: debt.id }), b.user.id);
+  await db.update('users', { id: b.user.id }, { $set: { email_code_sent: new Date(0) } });
+  const changed = await call('/profile', b.token, { name: 'Sara', username: 'sara', email: 'new@example.test' }, 'PATCH');
+  assert.equal(changed.data.emailVerified, false);
+  assert.ok((await db.many('email_outbox', { user_id: b.user.id, status: 'canceled' })).length > 0);
+  const newCode = sent.at(-1).text.match(/code is (\d{6})/)[1];
+  for (let i = 0; i < 5; i++) await call('/email/verify', b.token, { code: 'wrong' });
+  assert.equal((await call('/email/verify', b.token, { code: newCode })).status, 400, 'five failed attempts invalidate the code');
+  assert.ok((await db.many('email_outbox', { status: 'sent' })).every(m => !m.text), 'sent verification content is removed');
+  // Global sending budget is atomic across simultaneous workers.
+  const reservations = await Promise.all(Array.from({ length: 105 }, () => db.reserveEmailAttempt(100)));
+  assert.ok(reservations.filter(Boolean).length < 100, 'previous sends count toward the rolling cap');
+  assert.equal(await db.reserveEmailAttempt(100), false);
+});

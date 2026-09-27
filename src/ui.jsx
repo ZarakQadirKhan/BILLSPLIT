@@ -25,7 +25,7 @@ export const shortDate = (date) =>
     month: "short",
   });
 export const Avatar = ({ name, index = 0, small = false }) => (
-  <span className={`avatar color-${index % 5} ${small ? "small" : ""}`}>
+  <span aria-hidden="true" className={`avatar color-${index % 5} ${small ? "small" : ""}`}>
     {(name || "?")
       .split(/\s+/)
       .slice(0, 2)
@@ -79,6 +79,7 @@ export function MoneyInput({ value, onChange, optional = false, ...props }) {
       <span>Rs</span>
       <input
         type="number"
+        inputMode="decimal"
         step="0.01"
         min={props.min ?? 0}
         value={value == null ? "" : value / 100}

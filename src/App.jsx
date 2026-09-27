@@ -474,7 +474,7 @@ export default function App() {
                   </button>
                 </div>
               )}
-              <div className="page-heading">
+              <div className={`page-heading ${view === 'overview' ? 'home-heading' : ''}`}>
                 <div>
                   <div className="eyebrow">
                     {view === "overview"

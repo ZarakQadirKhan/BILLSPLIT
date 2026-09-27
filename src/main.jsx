@@ -5,4 +5,5 @@ import './styles.css';
 import './details.css';
 import './rides.css';
 import './simple.css';
+import './friends-theme.css';
 createRoot(document.getElementById('root')).render(<App />);

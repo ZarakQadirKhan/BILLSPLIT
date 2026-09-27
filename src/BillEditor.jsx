@@ -20,6 +20,8 @@ import { calculate, id, money, validateBill } from "../shared/calculations.js";
 import { parseReceipt } from "../shared/parser.js";
 import { request, prepareImage, scanImage } from "./api.js";
 import { Avatar, Breakdown, MoneyInput, Empty } from "./ui.jsx";
+import ItemAssignments from "./ItemAssignments.jsx";
+import { assignedQuantity, equalAllocations } from "../shared/allocations.js";
 
 export default function BillEditor({
   initial,
@@ -48,7 +50,9 @@ export default function BillEditor({
     setBill((current) => ({
       ...current,
       items: current.items.map((item) =>
-        item.id === itemId ? { ...item, ...patch } : item,
+        item.id === itemId
+          ? { ...item, ...(typeof patch === "function" ? patch(item) : patch) }
+          : item,
       ),
     }));
   useEffect(
@@ -151,25 +155,6 @@ export default function BillEditor({
         })),
       });
     } else change({ participants: [...bill.participants, personId] });
-  };
-  const allocate = (item, personId, quantity) =>
-    changeItem(item.id, {
-      allocations: [
-        ...item.allocations.filter((a) => a.personId !== personId),
-        ...(quantity > 0 ? [{ personId, quantity }] : []),
-      ],
-    });
-  const splitEvenly = (item) => {
-    const unit = item.quantity / bill.participants.length;
-    changeItem(item.id, {
-      allocations: bill.participants.map((personId, index) => ({
-        personId,
-        quantity:
-          index === bill.participants.length - 1
-            ? item.quantity - unit * index
-            : unit,
-      })),
-    });
   };
   const save = async (publish) => {
     if (busy) return;
@@ -465,7 +450,8 @@ export default function BillEditor({
                               />
                             </label>
                           </div>
-                          <details className="item-options"><summary>Item options</summary>
+                          <details className="item-options">
+                            <summary>Item options</summary>
                             <label className="checkbox-label">
                               <input
                                 type="checkbox"
@@ -506,8 +492,19 @@ export default function BillEditor({
                   </div>
                 )}
               </section>
-              <details className="card optional-fields" key={'discount-' + (bill.discount.type !== 'none')} open={bill.discount.type !== 'none' || undefined}>
-                <summary>Discount <span>{result.discount ? '−' + money(result.discount) : 'Add a discount or cap'}</span></summary>
+              <details
+                className="card optional-fields"
+                key={"discount-" + (bill.discount.type !== "none")}
+                open={bill.discount.type !== "none" || undefined}
+              >
+                <summary>
+                  Discount{" "}
+                  <span>
+                    {result.discount
+                      ? "−" + money(result.discount)
+                      : "Add a discount or cap"}
+                  </span>
+                </summary>
                 <div className="form-grid">
                   <label>
                     Discount type
@@ -612,8 +609,19 @@ export default function BillEditor({
                   </div>
                 )}
               </details>
-              <details className="card optional-fields" key={'tax-' + Boolean(result.tax || result.fees)} open={Boolean(result.tax || result.fees) || undefined}>
-                <summary>Tax, fees & rounding <span>{result.tax || result.fees ? money(result.tax + result.fees) : 'Add only if needed'}</span></summary>
+              <details
+                className="card optional-fields"
+                key={"tax-" + Boolean(result.tax || result.fees)}
+                open={Boolean(result.tax || result.fees) || undefined}
+              >
+                <summary>
+                  Tax, fees & rounding{" "}
+                  <span>
+                    {result.tax || result.fees
+                      ? money(result.tax + result.fees)
+                      : "Add only if needed"}
+                  </span>
+                </summary>
                 <div className="form-grid">
                   <label>
                     Tax type
@@ -810,104 +818,77 @@ export default function BillEditor({
               <section className="card">
                 <div className="section-heading">
                   <h2>Who had what?</h2>
-                  <span className="badge">Quantities & shared items</span>
+                  <span className="badge">Tap to assign</span>
                 </div>
                 <p className="muted">
-                  Splitting everything evenly? Use one button. Otherwise assign each item below.
+                  Tap your friends below each item. Sharing everything? Split
+                  the whole bill in one go.
                 </p>
-                {bill.items.length > 0 && <button className="button equal-all" onClick={() => {
-                  if (bill.items.some(item => item.allocations.length) && !window.confirm('Replace current item assignments with an equal split?')) return;
-                  change({ items: bill.items.map(item => {
-                    const unit = item.quantity / bill.participants.length;
-                    return { ...item, allocations: bill.participants.map((personId, index) => ({ personId, quantity: index === bill.participants.length - 1 ? item.quantity - unit * index : unit })) };
-                  }) });
-                }}><Equal size={18}/> Split all items equally</button>}
+                {bill.items.length > 0 && (
+                  <button
+                    className="button equal-all"
+                    onClick={() => {
+                      if (
+                        bill.items.some((item) => item.allocations.length) &&
+                        !window.confirm(
+                          "Replace current item assignments with an equal split?",
+                        )
+                      )
+                        return;
+                      change({
+                        items: bill.items.map((item) => {
+                          return {
+                            ...item,
+                            allocations: equalAllocations(
+                              item.quantity,
+                              bill.participants,
+                            ),
+                          };
+                        }),
+                      });
+                    }}
+                  >
+                    <Equal size={18} /> Split all items equally
+                  </button>
+                )}
                 {bill.items.length === 0 && (
                   <Empty
                     title="Add your items first"
                     text="Return to the review step to add food and drinks."
                   />
                 )}
-                {bill.items.map((item) => {
-                  const assigned = item.allocations.reduce(
-                      (sum, a) => sum + a.quantity,
-                      0,
-                    ),
-                    remaining = item.quantity - assigned;
-                  return (
-                    <div className="allocation-item" key={item.id}>
-                      <div className="allocation-heading">
-                        <div>
-                          <h3>
-                            {item.name || "Untitled item"}{" "}
-                            <span>× {item.quantity}</span>
-                          </h3>
-                          <small>
-                            {money(
-                              item.lineTotalCents ??
-                                Math.round(item.quantity * item.unitPriceCents),
-                            )}{" "}
-                            before discounts
-                          </small>
-                        </div>
-                        <button
-                          className="text-button"
-                          onClick={() => splitEvenly(item)}
-                        >
-                          <Equal size={15} /> Share equally
-                        </button>
-                      </div>
-                      <div className="allocation-grid">
-                        {participants.map((p, i) => (
-                          <div className="allocation-person" key={p.id}>
-                            <span>
-                              <Avatar name={p.name} small index={i} />
-                              {p.id === user.id ? "You" : p.name}
-                            </span>
-                            <div className="quantity-stepper">
-                            <button aria-label={`Remove one ${item.name} from ${p.name}`} disabled={!(item.allocations.find(a => a.personId === p.id)?.quantity > 0)} onClick={() => allocate(item, p.id, Math.max(0, (item.allocations.find(a => a.personId === p.id)?.quantity || 0) - 1))}>−</button>
-                            <input
-                              aria-label={`${item.name} quantity for ${p.name}`}
-                              type="number"
-                              min="0"
-                              max={item.quantity}
-                              step="any"
-                              value={
-                                item.allocations.find(
-                                  (a) => a.personId === p.id,
-                                )?.quantity ?? 0
-                              }
-                              onChange={(e) =>
-                                allocate(item, p.id, Number(e.target.value))
-                              }
-                            />
-                            <button aria-label={`Add one ${item.name} to ${p.name}`} disabled={remaining <= 0.000001} onClick={() => allocate(item, p.id, (item.allocations.find(a => a.personId === p.id)?.quantity || 0) + Math.min(1, Math.max(0, remaining)))}>+</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div
-                        className={`allocation-status ${Math.abs(remaining) < 0.000001 ? "done" : "unfinished"}`}
-                      >
-                        {Math.abs(remaining) < 0.000001 ? (
-                          <>
-                            <Check size={14} /> All {item.quantity} assigned
-                          </>
-                        ) : (
-                          <>
-                            <AlertCircle size={14} />
-                            {Math.abs(remaining)
-                              .toFixed(2)
-                              .replace(/\.00$/, "")}{" "}
-                            {remaining > 0
-                              ? "left to assign"
-                              : "too many assigned"}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                <div className="assignment-progress" role="status">
+                  <span>
+                    {
+                      bill.items.filter(
+                        (item) =>
+                          Math.abs(item.quantity - assignedQuantity(item)) <
+                          0.000001,
+                      ).length
+                    }{" "}
+                    of {bill.items.length} items sorted
+                  </span>
+                  <progress
+                    aria-label="Items fully assigned"
+                    max={Math.max(1, bill.items.length)}
+                    value={
+                      bill.items.filter(
+                        (item) =>
+                          Math.abs(item.quantity - assignedQuantity(item)) <
+                          0.000001,
+                      ).length
+                    }
+                  />
+                </div>
+                {bill.items.map((item) => (
+                  <ItemAssignments
+                    key={item.id}
+                    item={item}
+                    participants={participants}
+                    user={user}
+                    onChange={(patch) => changeItem(item.id, patch)}
+                  />
+                ))}
               </section>
               <section className="card">
                 <h2>Everyone’s final share</h2>
@@ -1092,7 +1073,37 @@ export default function BillEditor({
           )}
         </aside>
       </div>
-      <div className="mobile-editor-action"><span>Bill total<strong>{money(result.total)}</strong></span>{step === 'review' ? <button className="button primary" disabled={!bill.items.length || !!progress} onClick={() => { setStep('split'); window.scrollTo?.({ top: 0, behavior: 'instant' }); }}>Next: choose people <ArrowRight size={16}/></button> : <button className="button primary" disabled={!result.complete || !payer?.claimed || !payer?.paymentDetails || busy || !!progress} onClick={() => save(true)}>{busy ? 'Sending…' : 'Send shares'}</button>}</div>
+      <div className="mobile-editor-action">
+        <span>
+          Bill total<strong>{money(result.total)}</strong>
+        </span>
+        {step === "review" ? (
+          <button
+            className="button primary"
+            disabled={!bill.items.length || !!progress}
+            onClick={() => {
+              setStep("split");
+              window.scrollTo?.({ top: 0, behavior: "instant" });
+            }}
+          >
+            Next: choose people <ArrowRight size={16} />
+          </button>
+        ) : (
+          <button
+            className="button primary"
+            disabled={
+              !result.complete ||
+              !payer?.claimed ||
+              !payer?.paymentDetails ||
+              busy ||
+              !!progress
+            }
+            onClick={() => save(true)}
+          >
+            {busy ? "Sending…" : "Send shares"}
+          </button>
+        )}
+      </div>
     </>
   );
 }

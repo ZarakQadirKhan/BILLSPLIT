@@ -10,7 +10,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
   Object.assign(globalThis, { window:dom.window, document:dom.window.document, HTMLElement:dom.window.HTMLElement, localStorage:dom.window.localStorage, location:dom.window.location, history:dom.window.history, IS_REACT_ACT_ENVIRONMENT:true });
   Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
   dom.window.HTMLDialogElement.prototype.showModal = function(){ this.open = true; };
-  const vite = await createServer({ server:{middlewareMode:true,hmr:{port:0}}, appType:'custom' });
+  const vite = await createServer({ server:{middlewareMode:true,hmr:false}, appType:'custom' });
   const { render, screen, fireEvent, cleanup, act } = await import('@testing-library/react');
   try {
     const { default:BillEditor } = await vite.ssrLoadModule('/src/BillEditor.jsx');
@@ -24,12 +24,13 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     fireEvent.change(screen.getByLabelText('Discount percentage'),{target:{value:'50'}});
     fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
-    fireEvent.change(screen.getByLabelText('Dinner plates quantity for Ali'),{target:{value:'1'}});
-    fireEvent.change(screen.getByLabelText('Dinner plates quantity for Sara'),{target:{value:'1'}});
+    fireEvent.click(screen.getByRole('button',{name:'Add one Dinner plates to Ali'}));
+    fireEvent.click(screen.getByRole('button',{name:'Add one Dinner plates to Sara'}));
     assert.ok(screen.getByText('All 2 assigned'));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
     fireEvent.change(screen.getByLabelText('Dinner plates quantity for Sara'),{target:{value:'2'}});
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
+    fireEvent.click(screen.getByRole('button',{name:'Share Dinner plates'}));
     fireEvent.click(screen.getByRole('button',{name:'Share equally'}));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
     fireEvent.click(screen.getByRole('button',{name:'Remove one Dinner plates from Sara'}));
@@ -43,6 +44,32 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
     fireEvent.click(screen.getByRole('button',{name:'Add an explicit adjustment'}));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    cleanup();
+
+    const {default:ItemAssignments} = await vite.ssrLoadModule('/src/ItemAssignments.jsx');
+    function AssignmentHarness({quantity}) {
+      const [item,setItem]=React.useState({id:'drink',name:'Cola',quantity,unitPriceCents:10000,allocations:[]});
+      return React.createElement(ItemAssignments,{item,participants:[user,sara],user,onChange:patch=>setItem(current=>({...current,...(typeof patch==='function'?patch(current):patch)}))});
+    }
+    render(React.createElement(AssignmentHarness,{quantity:6}));
+    const addAli=screen.getByRole('button',{name:'Add one Cola to Ali'});
+    act(()=>{ for(let i=0;i<8;i++) fireEvent.click(addAli); });
+    assert.equal(screen.getByLabelText('Cola quantity for Ali').value,'6','batched taps never exceed quantity');
+    fireEvent.click(screen.getByRole('button',{name:'Remove one Cola from Ali'}));
+    fireEvent.click(screen.getByRole('button',{name:'Add one Cola to Sara'}));
+    assert.equal(screen.getByLabelText('Cola quantity for Sara').value,'1');
+    assert.ok(screen.getByText('All 6 assigned'));
+    cleanup();
+    render(React.createElement(AssignmentHarness,{quantity:1}));
+    fireEvent.click(screen.getByRole('button',{name:'Assign Cola to Ali'}));
+    fireEvent.click(screen.getByRole('button',{name:'Assign Cola to Sara'}));
+    assert.equal(screen.getByLabelText('Cola quantity for Ali').value,'0');
+    assert.equal(screen.getByLabelText('Cola quantity for Sara').value,'1');
+    fireEvent.click(screen.getByRole('button',{name:'Share Cola'}));
+    fireEvent.click(screen.getByRole('button',{name:'You'}));
+    fireEvent.click(screen.getByRole('button',{name:'Split between 2'}));
+    assert.equal(screen.getByLabelText('Cola quantity for Sara').value,'0.5');
+    assert.equal(screen.getByLabelText('Cola quantity for Ali').value,'0.5');
     cleanup();
 
     const { default:RideEditor } = await vite.ssrLoadModule('/src/RideEditor.jsx');

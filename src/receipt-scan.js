@@ -2,6 +2,19 @@ import { parseReceipt } from "../shared/parser.js";
 import { normalizeReceipt } from "../shared/receipt-schema.js";
 import { request, scanImage } from "./api.js";
 
+const fallbackReasons = {
+  quota: "Gemini’s free quota is currently exhausted",
+  daily_cap: "The app’s daily Gemini safety limit was reached",
+  busy: "Too many scans were requested in a minute",
+  service_busy: "Google’s Gemini service is temporarily busy",
+  timeout: "Gemini took too long to respond",
+  not_configured: "Gemini is not configured or is disabled",
+  access_denied: "Google rejected the app’s Gemini API access",
+  request_rejected: "Google rejected the Gemini scan request",
+  model_unavailable: "The configured Gemini model is unavailable",
+  invalid_result: "Gemini’s result could not be safely read",
+};
+
 export async function extractReceipt(
   blob,
   progress,
@@ -32,14 +45,14 @@ export async function extractReceipt(
         };
       }
       reason = result.reason;
-    } catch {
-      reason = "unavailable";
+    } catch (error) {
+      reason = ["TimeoutError", "AbortError"].includes(error.name)
+        ? "timeout"
+        : "unavailable";
     }
   }
   const fallback = useGemini
-    ? ["quota", "daily_cap", "busy"].includes(reason)
-      ? "Gemini limit reached — used private on-device OCR."
-      : "Gemini unavailable — used private on-device OCR."
+    ? `${fallbackReasons[reason] || "Gemini is unavailable"} — used private on-device OCR.`
     : "";
   progress({
     status: fallback || "Reading privately on this device",

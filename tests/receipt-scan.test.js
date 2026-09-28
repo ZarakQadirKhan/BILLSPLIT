@@ -208,6 +208,121 @@ test("provider faults and invalid responses request OCR, without leaking provide
   );
 });
 
+test("temporary provider outages retry once, within the same deadline and daily budget", async () => {
+  let calls = 0,
+    pauses = 0,
+    daily = 0;
+  const signals = [];
+  const db = {
+    one: async () => null,
+    rateLimit: async (key) => ({
+      count: key === "receipt-daily" ? ++daily : 1,
+    }),
+    update: async () => {},
+  };
+  const scan = createReceiptScanner(db, {
+    key: "test-only-key",
+    pause: async (ms) => {
+      pauses++;
+      assert.ok(ms >= 1000 && ms <= 2000);
+    },
+    fetch: async (_url, options) => {
+      signals.push(options.signal);
+      return ++calls === 1 ? { ok: false, status: 503 } : ok(sample());
+    },
+  });
+  assert.equal((await scan(photo, "image/png", "tester")).source, "gemini");
+  assert.equal(calls, 2);
+  assert.equal(pauses, 1);
+  assert.equal(daily, 2);
+  assert.equal(signals[0], signals[1], "retry must not extend the timeout");
+
+  for (const [status, attempts, reason] of [
+    [503, 2, "service_busy"],
+    [502, 2, "service_busy"],
+    [504, 2, "service_busy"],
+    [429, 1, "quota"],
+    [400, 1, "request_rejected"],
+    [403, 1, "access_denied"],
+    [404, 1, "model_unavailable"],
+  ]) {
+    calls = 0;
+    daily = 0;
+    const result = await createReceiptScanner(db, {
+      key: "test-only-key",
+      pause: async () => {},
+      fetch: async () => {
+        calls++;
+        return { ok: false, status };
+      },
+    })(photo, "image/png", "tester");
+    assert.equal(result.reason, reason);
+    assert.equal(calls, attempts);
+  }
+  calls = 0;
+  daily = 0;
+  const capped = await createReceiptScanner(db, {
+    key: "test-only-key",
+    dailyLimit: 1,
+    pause: async () => {},
+    fetch: async () => {
+      calls++;
+      return { ok: false, status: 503 };
+    },
+  })(photo, "image/png", "tester");
+  assert.equal(capped.reason, "daily_cap");
+  assert.equal(calls, 1, "retry cannot bypass the daily cap");
+
+  calls = 0;
+  daily = 0;
+  const longWait = await createReceiptScanner(db, {
+    key: "test-only-key",
+    pause: async () => assert.fail("must not ignore Retry-After"),
+    fetch: async () => {
+      calls++;
+      return {
+        ok: false,
+        status: 503,
+        headers: new Headers({ "Retry-After": "60" }),
+      };
+    },
+  })(photo, "image/png", "tester");
+  assert.equal(longWait.reason, "service_busy");
+  assert.equal(calls, 1);
+});
+
+test("receipt format preserves quantity/value rows and unresolved cash/card totals", () => {
+  const receipt = sample();
+  receipt.items = [
+    {
+      name: "Seafood",
+      quantity: 2,
+      unitPriceCents: null,
+      lineTotalCents: 1200000,
+      eligible: true,
+      uncertain: false,
+    },
+    {
+      name: "Pepsi Black",
+      quantity: 2,
+      unitPriceCents: null,
+      lineTotalCents: 50000,
+      eligible: true,
+      uncertain: false,
+    },
+  ];
+  receipt.charges.taxCents = null;
+  receipt.charges.taxRate = null;
+  receipt.receiptTotalCents = null;
+  receipt.warnings = ["Choose the card or cash tax and total actually paid."];
+  const parsed = normalizeReceipt(receipt);
+  assert.equal(parsed.items[0].unitPriceCents, 600000);
+  assert.equal(parsed.items[1].unitPriceCents, 25000);
+  assert.equal(parsed.receiptTotalCents, null);
+  assert.equal(parsed.charges.taxCents, null);
+  assert.match(parsed.warnings[0], /card or cash/);
+});
+
 test("client uses valid Gemini output, falls back once, and private mode makes no API call", async () => {
   let sends = 0,
     ocrs = 0;
@@ -246,4 +361,10 @@ test("client uses valid Gemini output, falls back once, and private mode makes n
   });
   assert.equal(sends, 1);
   assert.equal(ocrs, 4);
+  result = await extractReceipt(blob, () => {}, {
+    send: async () => ({ source: "ocr", reason: "service_busy" }),
+    ocr,
+  });
+  assert.match(result.fallback, /Google’s Gemini service is temporarily busy/);
+  assert.equal(ocrs, 5);
 });

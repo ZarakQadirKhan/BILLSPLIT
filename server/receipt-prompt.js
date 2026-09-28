@@ -9,11 +9,13 @@ Use the restaurant name as title, or an empty string. Do not transcribe names, p
 Do not assign people, calculate anyone's share, follow URLs, or output HTML/Markdown.
 Items are purchased food/drink lines only. Subtotal, total, cash tendered, change, tax, service, delivery, tips and discounts are NOT items.
 Keep repeated purchased rows separate. Do not duplicate a wrapped item description. Preserve a printed line total even if quantity × unit price disagrees.
+If the table has Qty and Value/Amount columns but no unit-price column, Value/Amount is the LINE TOTAL, not the unit price. Leave unitPriceCents null; our app derives it from line total / quantity.
 eligible is true unless a printed discount rule clearly excludes this item. uncertain flags ambiguous extraction.
 Charges: discountCents is the actual printed discount amount (positive), discountRate is the printed percentage.
 eligibleCapCents limits the BASE to which the discount applies. maxDiscountCents limits the SAVINGS. Never confuse them.
 Extract both printed discount amount and rate when available; the app will prefer the exact printed amount. Warn if multiple promotions cannot be represented by a single discount.
 taxCents is the printed total tax amount. taxRate is the printed rate; use null when multiple rates cannot be combined safely. taxBasis is before/after only if explicitly clear, otherwise null. Do not count included tax twice: for inclusive or otherwise unsupported tax layouts, return a warning for manual review.
+If alternate card/cash taxes or totals are printed and the actual payment method is not marked, never select one or add them together. Set taxCents, taxRate, taxBasis and receiptTotalCents to null, and list the visible alternatives in a warning asking which was paid. A pre-tax subtotal is not the final charged total.
 Do not invent a rounding adjustment to force totals to match. Do not convert currencies; warn if the currency is not PKR.
 
 EXAMPLE A — input: Cafe Demo / Cold drinks 6 x 200 1200 / Loaded fries 1 x 800 800 / Total 2000
@@ -27,4 +29,6 @@ Relevant fields: item quantity=2, unitPriceCents=50000, lineTotalCents=95000; di
 
 EXAMPLE D — input: Pizza [blurred price] / Total [blurred]
 Relevant fields: name="Pizza", quantity=1, unitPriceCents=null, lineTotalCents=null, uncertain=true; receiptTotalCents=null; warnings=["Pizza price and final total are unreadable. Please enter them manually."].
+EXAMPLE E — input: Qty / Value: Seafood 2 / 12000; Pepsi Black 2 / 500. Card GST 5% Rs 625, total Rs 13125; Cash GST 16% Rs 2000, total Rs 14500. Payment method not marked.
+Relevant fields: Seafood quantity=2, unitPriceCents=null, lineTotalCents=1200000; Pepsi Black quantity=2, unitPriceCents=null, lineTotalCents=50000; taxCents=null, taxRate=null, taxBasis=null, receiptTotalCents=null; warnings=["Choose the amount actually paid: card total Rs 13,125 (tax Rs 625) or cash total Rs 14,500 (tax Rs 2,000). Enter the chosen tax and final charged amount."]
 Examples demonstrate formatting ONLY. Never copy their items/values unless actually visible in the supplied image.`;

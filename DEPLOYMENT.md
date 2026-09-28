@@ -1,6 +1,6 @@
 # Deploy for $0: Vercel Hobby + MongoDB Atlas Free
 
-The app records payments, but never transfers money. OCR runs on-device without paid APIs; receipt photos are not uploaded. Deploying requires your own accounts. No cloud resources are created by building or testing the code.
+The app records payments, but never transfers money. Local OCR runs on-device. Optional Gemini scanning sends a redacted photo to Google only after confirmation, without persisting it in our app. Deploying requires your own accounts. No cloud resources are created by building or testing the code.
 
 ## 1. Create the free database
 
@@ -73,7 +73,15 @@ No migration is run automatically. The script prints counts, not private data. B
 
 ## Cost and scope
 
-Use only **Vercel Hobby**, **Atlas Free**, and a **free personal Gmail sender**. No payment gateway, SMS, paid email provider, paid OCR or LLM is configured. Free services have usage/storage limits and can pause or throttle; the code cannot control account upgrades or provider policy changes. Do not accept paid trials or add-ons.
+Use only **Vercel Hobby**, **Atlas Free**, a **free personal Gmail sender**, and an optional **Gemini Free Tier project with billing disabled**. No payment gateway, SMS, or paid email provider is configured. Free services have usage/storage limits and can pause or throttle; the code cannot control account upgrades or provider policy changes. Do not accept paid trials or add-ons.
+
+## Optional Gemini receipt reader
+
+Save `GEMINI_API_KEY` privately in Vercel Production, never with a `VITE_` prefix. The model is pinned to `gemini-3.8-flash`; the app never switches to a paid model or enables billing. Confirm the key's Google project is Free Tier with no billing account. A key alone does not let our code verify billing status.
+
+`GEMINI_DAILY_LIMIT` defaults to 20 app-wide attempts per UTC day (maximum 100; 0 disables Gemini). This is an app safeguard, NOT Google's advertised quota. It is shared atomically through MongoDB across server instances; only counters are stored. Each user is limited to 3 attempts/minute. Provider 429 responses trigger a shared 60-second cooldown. No automatic Gemini retries: the device falls back to OCR. Provider quota remains authoritative and can be lower than our cap.
+
+Images are validated, limited to 2 MB after device preparation, and sent inline through an authenticated route with a consent header. Neither request images nor provider error bodies are logged or stored. Interactions use `store:false`; Google's separate free-tier training/review terms still apply. Crop/redact personal data in your photo editor before using Gemini, or choose Private OCR. Request and response schemas, examples and server validation are in `shared/receipt-schema.js`, `server/receipt-prompt.js`, and `server/receipt-scan.js`. Financial calculations remain deterministic. Scanning itself never creates bills or debts.
 
 The current Atlas Free storage limit is 512 MB including indexes. Photos are not stored, leaving space for bill records. Notifications refresh in-app every 30 seconds while visible; there is no background push. Actual payments take place through cash, bank or wallet outside this app. Only recipient confirmation changes a debt to paid.
 

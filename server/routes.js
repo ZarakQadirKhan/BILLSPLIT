@@ -4,6 +4,7 @@ import { calculate, validateBill, UNASSIGNED } from '../shared/calculations.js';
 import { openDatabase } from './database.js';
 import { normalizeUsername, normalizeEmail } from '../shared/identity.js';
 import { createEmailService } from './email.js';
+import { createReceiptScanner, validReceiptImage } from './receipt-scan.js';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -17,6 +18,7 @@ const debtResult = row => ({ ...row, paymentStatus: row.status === 'confirmed' ?
 export async function createApi(dataDirectory, options = {}) {
   const db = await openDatabase(dataDirectory, options);
   const mail = createEmailService(db, options.mail);
+  const scanReceipt = createReceiptScanner(db, options.scanner);
   // One read-only SMTP handshake per server instance. No test messages are sent.
   if (options.background && mail.enabled) options.background(mail.verifySender());
   const getUser = id => db.one('users', { id });
@@ -126,6 +128,15 @@ export async function createApi(dataDirectory, options = {}) {
     res.json({ token: await issueSession(user.id), user: selfUser(user) });
   });
   api.use(requireUser);
+  api.post('/scan-receipt', (req, res, next) => {
+    if (req.get('x-receipt-consent') !== 'gemini') return res.status(400).json({ error: 'Choose Gemini scanning and confirm the privacy notice first.' });
+    next();
+  }, express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '2mb' }), async (req, res) => {
+    const mime = req.get('content-type')?.split(';')[0];
+    if (!validReceiptImage(req.body, mime)) return res.status(400).json({ error: 'Choose a valid JPG, PNG or WebP image under 2 MB after preparation.' });
+    const result = await scanReceipt(req.body, mime, req.user.id);
+    res.json(result);
+  });
   api.post('/invite/:token/claim', async (req, res) => {
     await db.transaction(() => claim(req.params.token, req.user.id)); res.json({ ok: true });
   });

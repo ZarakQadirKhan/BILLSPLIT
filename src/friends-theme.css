@@ -1,4 +1,6 @@
 /* A sunny, high-contrast palette. Payment states always have text, not just color. */
+.scan-mode { margin-bottom: 10px; }
+.scan-mode + .footnote { margin-bottom: 18px; }
 :root {
   --green: #3448ce;
   --lime: #fff09b;

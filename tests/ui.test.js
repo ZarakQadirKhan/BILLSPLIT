@@ -46,6 +46,33 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
     cleanup();
 
+    // Exercise the full file -> Gemini -> editable fields flow without any real API.
+    const savedFetch=globalThis.fetch, savedBitmap=globalThis.createImageBitmap;
+    const savedContext=dom.window.HTMLCanvasElement.prototype.getContext, savedBlob=dom.window.HTMLCanvasElement.prototype.toBlob;
+    globalThis.createImageBitmap=async()=>({width:100,height:100,close(){}});
+    dom.window.HTMLCanvasElement.prototype.getContext=()=>({fillRect(){},drawImage(){}});
+    dom.window.HTMLCanvasElement.prototype.toBlob=callback=>callback(new Blob(['synthetic'],{type:'image/jpeg'}));
+    globalThis.fetch=async()=>({ok:true,json:async()=>({source:'gemini',receipt:{title:'Scanned dinner',items:[{id:'scan',name:'Dinner',quantity:2,unitPriceCents:1500000,lineTotalCents:3000000,eligible:true,uncertain:false,allocations:[]}],charges:{discountCents:null,discountRate:50,eligibleCapCents:2000000,maxDiscountCents:null,taxCents:10000,taxRate:15,taxBasis:null,deliveryCents:null,serviceCents:null,tipCents:null},receiptTotalCents:2010000,warnings:[]}})});
+    try {
+      const scanning=newBill('ali'); scanning.adjustmentCents=5000; scanning.adjustmentReason='Old receipt adjustment';
+      const {container}=render(React.createElement(BillEditor,{initial:scanning,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+      assert.equal(screen.getByLabelText('Receipt reader').value,'gemini');
+      await act(async()=>fireEvent.change(container.querySelector('input[type=file]'),{target:{files:[new dom.window.File(['synthetic'],'receipt.jpg',{type:'image/jpeg'})]}}));
+      assert.ok(screen.getByRole('heading',{name:'Read with Gemini?'}));
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Details removed · scan with Gemini'})));
+      assert.ok(screen.getByText('Read with Gemini'));
+      assert.equal(screen.getByLabelText('Item 1 quantity').value,'2');
+      assert.equal(screen.getByLabelText('Discount percentage').value,'50');
+      assert.equal(screen.getByLabelText('Discount eligible amount limit').value,'20000');
+      assert.ok(screen.getByText('Matches your receipt'),'exact printed tax wins over percentage and old adjustment is cleared');
+      fireEvent.change(screen.getByLabelText('Receipt reader'),{target:{value:'private'}});
+      assert.ok(screen.getByText(/Private mode keeps the photo on your device/));
+    } finally {
+      cleanup(); globalThis.fetch=savedFetch;
+      if(savedBitmap) globalThis.createImageBitmap=savedBitmap; else delete globalThis.createImageBitmap;
+      dom.window.HTMLCanvasElement.prototype.getContext=savedContext; dom.window.HTMLCanvasElement.prototype.toBlob=savedBlob;
+    }
+
     const {default:ItemAssignments} = await vite.ssrLoadModule('/src/ItemAssignments.jsx');
     function AssignmentHarness({quantity}) {
       const [item,setItem]=React.useState({id:'drink',name:'Cola',quantity,unitPriceCents:10000,allocations:[]});

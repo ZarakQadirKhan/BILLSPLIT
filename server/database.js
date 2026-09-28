@@ -49,11 +49,11 @@ export async function openDatabase(_directory, options = {}) {
         ], { returnDocument: 'after' });
         return row.permitted;
       },
-      async rateLimit(key) {
-        const time = Date.now(), id = key + ':' + Math.floor(time / 60000);
-        // Fixed one-minute windows with TTL cleanup; never store raw IP addresses.
+      async rateLimit(key, windowMs = 60000) {
+        const time = Date.now(), id = key + ':' + Math.floor(time / windowMs);
+        // Fixed windows (one minute by default) with TTL cleanup; never store raw IP addresses.
         try {
-          return await mongo.collection('rate_limits').findOneAndUpdate({ id }, { $inc: { count: 1 }, $setOnInsert: { expires_at: new Date(time + 120000) } }, { upsert: true, returnDocument: 'after' });
+          return await mongo.collection('rate_limits').findOneAndUpdate({ id }, { $inc: { count: 1 }, $setOnInsert: { expires_at: new Date(time + 2 * windowMs) } }, { upsert: true, returnDocument: 'after' });
         } catch (error) {
           if (error.code !== 11000) throw error;
           return mongo.collection('rate_limits').findOneAndUpdate({ id }, { $inc: { count: 1 } }, { returnDocument: 'after' });

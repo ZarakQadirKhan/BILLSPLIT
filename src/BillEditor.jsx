@@ -18,8 +18,9 @@ import {
 } from "lucide-react";
 import { calculate, id, money, validateBill } from "../shared/calculations.js";
 import { parseReceipt } from "../shared/parser.js";
-import { request, prepareImage, scanImage } from "./api.js";
-import { Avatar, Breakdown, MoneyInput, Empty } from "./ui.jsx";
+import { request, prepareImage } from "./api.js";
+import { extractReceipt } from "./receipt-scan.js";
+import { Avatar, Breakdown, MoneyInput, Empty, Modal } from "./ui.jsx";
 import ItemAssignments from "./ItemAssignments.jsx";
 import { assignedQuantity, equalAllocations } from "../shared/allocations.js";
 
@@ -37,15 +38,26 @@ export default function BillEditor({
     [step, setStep] = useState("review"),
     [image, setImage] = useState(""),
     [raw, setRaw] = useState(""),
+    [scanMode, setScanMode] = useState("gemini"),
+    [scanSource, setScanSource] = useState(""),
+    [scanNotice, setScanNotice] = useState(""),
+    [awaitingConsent, setAwaitingConsent] = useState(false),
     [warnings, setWarnings] = useState([]),
     [error, setError] = useState(""),
     [progress, setProgress] = useState(null),
     [busy, setBusy] = useState(false);
   const fileRef = useRef(),
+    consentResolver = useRef(),
     result = calculate(bill),
     payer = people.find((p) => p.id === bill.paidBy),
     participants = people.filter((p) => bill.participants.includes(p.id));
   const change = (patch) => setBill((current) => ({ ...current, ...patch }));
+  const finishConsent = (choice) => {
+    setAwaitingConsent(false);
+    consentResolver.current?.(choice);
+    consentResolver.current = null;
+  };
+  useEffect(() => () => consentResolver.current?.(null), []);
   const changeItem = (itemId, patch) =>
     setBill((current) => ({
       ...current,
@@ -69,9 +81,8 @@ export default function BillEditor({
     window.addEventListener("beforeunload", before);
     return () => window.removeEventListener("beforeunload", before);
   }, []);
-  const applyText = (text) => {
-    const parsed = parseReceipt(text),
-      { charges } = parsed;
+  const applyParsed = (parsed) => {
+    const { charges } = parsed;
     setWarnings(parsed.warnings);
     setBill((current) => ({
       ...current,
@@ -88,22 +99,35 @@ export default function BillEditor({
               : "none",
         amountCents: charges.discountCents || 0,
         rate: charges.discountRate || 0,
-        eligibleCapCents: null,
-        maxDiscountCents: null,
+        eligibleCapCents: charges.eligibleCapCents ?? null,
+        maxDiscountCents: charges.maxDiscountCents ?? null,
       },
       tax: {
         ...current.tax,
-        type: charges.taxRate != null ? "percent" : "fixed",
+        type:
+          charges.taxCents != null
+            ? "fixed"
+            : charges.taxRate != null
+              ? "percent"
+              : "fixed",
         amountCents: charges.taxCents || 0,
         rate: charges.taxRate || 0,
+        basis: charges.taxBasis || "after",
       },
       deliveryCents: charges.deliveryCents || 0,
       serviceCents: charges.serviceCents || 0,
       tipCents: charges.tipCents || 0,
+      adjustmentCents: 0,
+      adjustmentReason: "",
     }));
   };
+  const applyText = (text) => {
+    applyParsed(parseReceipt(text));
+    setScanSource("Text extraction");
+    setScanNotice("");
+  };
   const upload = async (file) => {
-    if (!file) return;
+    if (!file || progress) return;
     if (
       bill.items.length &&
       !window.confirm(
@@ -112,13 +136,32 @@ export default function BillEditor({
     )
       return;
     setError("");
+    setScanNotice("");
+    setScanSource("");
     setProgress({ status: "Preparing your receipt", progress: 0 });
     try {
       const blob = await prepareImage(file);
       setImage(URL.createObjectURL(blob));
-      const text = await scanImage(blob, setProgress);
-      setRaw(text);
-      applyText(text);
+      const useGemini =
+        scanMode === "gemini"
+          ? await new Promise((resolve) => {
+              consentResolver.current = resolve;
+              setAwaitingConsent(true);
+            })
+          : false;
+      if (useGemini === null) {
+        setScanNotice("Scan cancelled. Bill details were not changed.");
+        return;
+      }
+      const extraction = await extractReceipt(blob, setProgress, { useGemini });
+      setRaw(extraction.text);
+      applyParsed(extraction.parsed);
+      setScanSource(
+        extraction.source === "gemini"
+          ? "Read with Gemini"
+          : "Read with on-device OCR",
+      );
+      setScanNotice(extraction.fallback || "");
       notify("Receipt read. Please check every item and the final total.");
     } catch (e) {
       setError(
@@ -181,6 +224,34 @@ export default function BillEditor({
   };
   return (
     <>
+      {awaitingConsent && (
+        <Modal title="Read with Gemini?" onClose={() => finishConsent(null)}>
+          <p className="muted">
+            This sends the photo shown below to Google. First crop or cover
+            names, phone numbers, addresses and payment details in your photo
+            editor.
+          </p>
+          <img
+            src={image}
+            alt="Receipt to review before sending to Gemini"
+            style={{ width: "100%", maxHeight: 200, objectFit: "contain" }}
+          />
+          <p className="muted">
+            Google’s free tier may use inputs for product improvement and human
+            review. Our app does not save the photo. If Gemini fails or reaches
+            its limit, we use on-device OCR.
+          </p>
+          <button
+            className="button primary full"
+            onClick={() => finishConsent(true)}
+          >
+            Details removed · scan with Gemini
+          </button>
+          <button className="button full" onClick={() => finishConsent(false)}>
+            Keep private · use on-device OCR
+          </button>
+        </Modal>
+      )}
       <button
         className="text-button back-button"
         onClick={() =>
@@ -241,8 +312,35 @@ export default function BillEditor({
                   <h2>
                     <ReceiptMark /> The receipt
                   </h2>
-                  <span className="badge">Read on your device</span>
+                  <span className="badge">
+                    {scanSource || "Gemini + OCR backup"}
+                  </span>
                 </div>
+                <label className="scan-mode">
+                  Receipt reader
+                  <select
+                    value={scanMode}
+                    disabled={!!progress}
+                    onChange={(e) => setScanMode(e.target.value)}
+                  >
+                    <option value="gemini">
+                      Gemini first · automatic OCR backup
+                    </option>
+                    <option value="private">
+                      Private · on-device OCR only
+                    </option>
+                  </select>
+                </label>
+                <p className="footnote">
+                  {scanMode === "gemini"
+                    ? "Gemini sends your photo to Google after confirmation. Crop or cover personal/payment details before choosing it. Google’s free tier may use it for improvement and human review. Our app never saves receipt photos."
+                    : "Private mode keeps the photo on your device. No image is sent to Google or our server."}
+                </p>
+                {scanNotice && (
+                  <p className="notice" role="status">
+                    {scanNotice}
+                  </p>
+                )}
                 <input
                   ref={fileRef}
                   type="file"
@@ -270,13 +368,13 @@ export default function BillEditor({
                       {progress
                         ? "Reading your receipt…"
                         : image
-                          ? "Your receipt · device-only preview"
+                          ? "Your receipt · temporary preview"
                           : "Scan your receipt here"}
                     </h3>
                     <p>
                       {progress
                         ? `${progress.status} · ${Math.round(progress.progress * 100)}%`
-                        : "Photos stay on this device and are not saved. Only reviewed bill details are stored. You can also enter items manually."}
+                        : "Only reviewed bill details are saved. You can also enter items manually. Leaving the editor discards this photo preview."}
                     </p>
                     {progress ? (
                       <progress

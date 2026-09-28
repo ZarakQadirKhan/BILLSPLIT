@@ -38,7 +38,7 @@ export default function BillEditor({
     [step, setStep] = useState("review"),
     [image, setImage] = useState(""),
     [raw, setRaw] = useState(""),
-    [scanMode, setScanMode] = useState("gemini"),
+    [scanMode, setScanMode] = useState("ai"),
     [scanSource, setScanSource] = useState(""),
     [scanNotice, setScanNotice] = useState(""),
     [awaitingConsent, setAwaitingConsent] = useState(false),
@@ -142,24 +142,26 @@ export default function BillEditor({
     try {
       const blob = await prepareImage(file);
       setImage(URL.createObjectURL(blob));
-      const useGemini =
-        scanMode === "gemini"
+      const useAI =
+        scanMode === "ai"
           ? await new Promise((resolve) => {
               consentResolver.current = resolve;
               setAwaitingConsent(true);
             })
           : false;
-      if (useGemini === null) {
+      if (useAI === null) {
         setScanNotice("Scan cancelled. Bill details were not changed.");
         return;
       }
-      const extraction = await extractReceipt(blob, setProgress, { useGemini });
+      const extraction = await extractReceipt(blob, setProgress, { useAI });
       setRaw(extraction.text);
       applyParsed(extraction.parsed);
       setScanSource(
-        extraction.source === "gemini"
-          ? "Read with Gemini"
-          : "Read with on-device OCR",
+        extraction.source === "openai"
+          ? "Read with GPT-6 Sol"
+          : extraction.source === "gemini"
+            ? "Read with Gemini"
+            : "Read with on-device OCR",
       );
       setScanNotice(extraction.fallback || "");
       notify("Receipt read. Please check every item and the final total.");
@@ -225,27 +227,28 @@ export default function BillEditor({
   return (
     <>
       {awaitingConsent && (
-        <Modal title="Read with Gemini?" onClose={() => finishConsent(null)}>
+        <Modal title="Read with AI?" onClose={() => finishConsent(null)}>
           <p className="muted">
-            This sends the photo shown below to Google. First crop or cover
-            names, phone numbers, addresses and payment details in your photo
-            editor.
+            This sends the photo to OpenAI, then Google if needed. First crop or
+            cover names, phone numbers, addresses and payment details in your
+            photo editor.
           </p>
           <img
             src={image}
-            alt="Receipt to review before sending to Gemini"
+            alt="Receipt to review before sending to AI providers"
             style={{ width: "100%", maxHeight: 200, objectFit: "contain" }}
           />
           <p className="muted">
-            Google’s free tier may use inputs for product improvement and human
-            review. Our app does not save the photo. If Gemini fails or reaches
-            its limit, we use on-device OCR.
+            GPT-6 Sol uses the app owner’s API credit within our spending limit.
+            Gemini is the backup; Google’s free tier may use photos for
+            improvement and human review. Our app does not save photos. If both
+            fail, OCR runs on your device.
           </p>
           <button
             className="button primary full"
             onClick={() => finishConsent(true)}
           >
-            Details removed · scan with Gemini
+            Scan with AI
           </button>
           <button className="button full" onClick={() => finishConsent(false)}>
             Keep private · use on-device OCR
@@ -313,7 +316,7 @@ export default function BillEditor({
                     <ReceiptMark /> The receipt
                   </h2>
                   <span className="badge">
-                    {scanSource || "Gemini + OCR backup"}
+                    {scanSource || "AI + OCR backup"}
                   </span>
                 </div>
                 <label className="scan-mode">
@@ -323,18 +326,16 @@ export default function BillEditor({
                     disabled={!!progress}
                     onChange={(e) => setScanMode(e.target.value)}
                   >
-                    <option value="gemini">
-                      Gemini first · automatic OCR backup
-                    </option>
+                    <option value="ai">AI · OpenAI → Gemini → OCR</option>
                     <option value="private">
                       Private · on-device OCR only
                     </option>
                   </select>
                 </label>
                 <p className="footnote">
-                  {scanMode === "gemini"
-                    ? "Gemini sends your photo to Google after confirmation. Crop or cover personal/payment details before choosing it. Google’s free tier may use it for improvement and human review. Our app never saves receipt photos."
-                    : "Private mode keeps the photo on your device. No image is sent to Google or our server."}
+                  {scanMode === "ai"
+                    ? "GPT-6 Sol first, Gemini backup, then private OCR. You’ll review the photo before sharing it. Our app never saves receipt photos."
+                    : "Private mode keeps the photo on your device. No image is sent to AI providers or our server."}
                 </p>
                 {scanNotice && (
                   <p className="notice" role="status">

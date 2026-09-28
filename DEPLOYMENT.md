@@ -1,6 +1,6 @@
 # Deploy for $0: Vercel Hobby + MongoDB Atlas Free
 
-The app records payments, but never transfers money. Local OCR runs on-device. Optional Gemini scanning sends a redacted photo to Google only after confirmation, without persisting it in our app. Deploying requires your own accounts. No cloud resources are created by building or testing the code.
+The app records payments, but never transfers money. Local OCR runs on-device. Optional AI scanning sends a photo to OpenAI and then Google if needed, only after confirmation, without persisting it in our app. Deploying requires your own accounts. No cloud resources are created by building or testing the code.
 
 ## 1. Create the free database
 
@@ -75,9 +75,15 @@ No migration is run automatically. The script prints counts, not private data. B
 
 Use only **Vercel Hobby**, **Atlas Free**, a **free personal Gmail sender**, and an optional **Gemini Free Tier project with billing disabled**. No payment gateway, SMS, or paid email provider is configured. Free services have usage/storage limits and can pause or throttle; the code cannot control account upgrades or provider policy changes. Do not accept paid trials or add-ons.
 
+**Explicit paid exception:** the owner has authorized existing OpenAI credit for GPT-6 Sol receipt extraction. Set `OPENAI_API_KEY` privately in Vercel Production. Never prefix it with `VITE_`. Missing/disabled OpenAI skips to Gemini. The order is GPT-6 Sol → Gemini 3.8 Flash → local OCR. Cached clients with Google-only consent still use only Gemini/OCR.
+
+`OPENAI_BUDGET_USD` defaults to $5 **cumulatively across this app**, capped at $5 in code; 0 or an invalid value disables paid scanning. It does not reset monthly or on deployments. MongoDB `ai_budget` and `ai_usage` store numeric usage and reservations only. Do not delete/reset these collections: doing so resets the safeguard. Before generating, the app counts input tokens and atomically reserves input cost plus the maximum 4,096 output tokens. Input over 20,000 tokens or unavailable token counting skips OpenAI. Reservations use cache-write pricing plus 10% headroom. Returned usage reconciles reservations conservatively, even for unusable model output. Missing responses, HTTP errors and timeouts retain the full reservation because their billing is uncertain. There are no paid automatic retries; limits are 3 attempts/user/minute, 20/app/UTC day and a 40-second OpenAI deadline. The browser allows 75 seconds for the two providers, then uses OCR.
+
+This is an application safeguard based on published prices, not a provider-side balance or billing guarantee. It cannot see spending by other apps, taxes, account adjustments or future price changes. No auto-top-up or billing setting is enabled by the app. Numeric usage and conservative estimated USD cost are logged safely for verification; the provider dashboard is authoritative. OpenAI input is conservatively estimated at $2.50/M (cache writes), output at $10/M; cache hits may cost less. Sources: [GPT-6 Sol pricing](https://developers.openai.com/api/docs/models/gpt-6-sol), [token counting](https://developers.openai.com/api/docs/guides/token-counting). OpenAI requests use `store:false` without tools or conversation history. Provider retention policies still apply.
+
 ## Optional Gemini receipt reader
 
-Save `GEMINI_API_KEY` privately in Vercel Production, never with a `VITE_` prefix. The model is pinned to `gemini-3.8-flash`; the app never switches to a paid model or enables billing. Confirm the key's Google project is Free Tier with no billing account. A key alone does not let our code verify billing status.
+Save `GEMINI_API_KEY` privately in Vercel Production, never with a `VITE_` prefix. The Gemini fallback is pinned to `gemini-3.8-flash`; the app never enables Google billing. Confirm the key's Google project is Free Tier with no billing account. A key alone does not let our code verify billing status.
 
 `GEMINI_DAILY_LIMIT` defaults to 20 app-wide attempts per UTC day (maximum 100; 0 disables Gemini). This is an app safeguard, NOT Google's advertised quota. It is shared atomically through MongoDB across server instances; only counters are stored. Each user is limited to 3 scans/minute. Provider 429 responses trigger a shared 60-second cooldown and immediate OCR fallback. Temporary HTTP 502/503/504 failures get at most one retry after a short jittered delay, within the original 25-second deadline; the retry also counts against the daily cap. Long Retry-After delays fall back to OCR instead. Other failures are not retried. Provider quota remains authoritative and can be lower than our cap. Safe logs record statuses and fallback categories only, and the UI explains why OCR was used.
 

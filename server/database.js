@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { MongoClient } from 'mongodb';
 
-export const collections = ['users', 'sessions', 'contacts', 'invitations', 'bills', 'debts', 'events', 'rate_limits', 'email_outbox'];
+export const collections = ['users', 'sessions', 'contacts', 'invitations', 'bills', 'debts', 'events', 'rate_limits', 'email_outbox', 'ai_budget', 'ai_usage'];
 
 export async function openDatabase(_directory, options = {}) {
   const uri = options.uri ?? process.env.MONGODB_URI;
@@ -39,6 +39,27 @@ export async function openDatabase(_directory, options = {}) {
       update: (name, filter, update, extra) => mongo.collection(name).updateOne(filter, update, settings(extra)),
       updateMany: (name, filter, update) => mongo.collection(name).updateMany(filter, update, settings()),
       remove: (name, filter) => mongo.collection(name).deleteMany(filter, settings()),
+      async reserveScanBudget(id, reservedNano, limitNano) {
+        if (!Number.isSafeInteger(reservedNano) || reservedNano <= 0 || !Number.isSafeInteger(limitNano) || limitNano < reservedNano) return false;
+        try {
+          await this.update('ai_budget', { id: 'openai-lifetime' }, { $setOnInsert: { chargedNano: 0 } }, { upsert: true });
+        } catch (error) { if (error.code !== 11000) throw error; }
+        return this.transaction(async () => {
+          const changed = await this.update('ai_budget', { id: 'openai-lifetime', chargedNano: { $lte: limitNano - reservedNano } }, { $inc: { chargedNano: reservedNano } });
+          if (!changed.modifiedCount) return false;
+          await this.insert('ai_usage', { id, reservedNano, status: 'reserved', createdAt: new Date() });
+          return true;
+        });
+      },
+      async settleScanBudget(id, chargedNano, usage) {
+        if (!Number.isSafeInteger(chargedNano) || chargedNano < 0) throw Error('Invalid scan cost');
+        return this.transaction(async () => {
+          const row = await this.one('ai_usage', { id, status: 'reserved' });
+          if (!row) return;
+          await this.update('ai_usage', { id, status: 'reserved' }, { $set: { status: 'settled', chargedNano, usage } });
+          await this.update('ai_budget', { id: 'openai-lifetime' }, { $inc: { chargedNano: chargedNano - row.reservedNano } });
+        });
+      },
       claimEmail: () => mongo.collection('email_outbox').findOneAndUpdate({ $or: [{ status: 'pending', retry_at: { $lte: new Date() } }, { status: 'sending', lease_until: { $lt: new Date() } }] }, { $set: { status: 'sending', lease_until: new Date(Date.now() + 60000) }, $inc: { attempts: 1 } }, { returnDocument: 'after', sort: { created_at: 1 }, projection: { _id: 0 } }),
       async reserveEmailAttempt(limit) {
         const cutoff = new Date(Date.now() - 86400000);

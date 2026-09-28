@@ -689,7 +689,7 @@ export default function App() {
               tab together <span>·</span> Good friends. Clear tabs.
             </span>
             <span>
-              <ShieldCheck size={13} /> No paid APIs
+              <ShieldCheck size={13} /> No payment gateway
             </span>
           </footer>
         </main>

@@ -56,10 +56,10 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     try {
       const scanning=newBill('ali'); scanning.adjustmentCents=5000; scanning.adjustmentReason='Old receipt adjustment';
       const {container}=render(React.createElement(BillEditor,{initial:scanning,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
-      assert.equal(screen.getByLabelText('Receipt reader').value,'gemini');
+      assert.equal(screen.getByLabelText('Receipt reader').value,'ai');
       await act(async()=>fireEvent.change(container.querySelector('input[type=file]'),{target:{files:[new dom.window.File(['synthetic'],'receipt.jpg',{type:'image/jpeg'})]}}));
-      assert.ok(screen.getByRole('heading',{name:'Read with Gemini?'}));
-      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Details removed · scan with Gemini'})));
+      assert.ok(screen.getByRole('heading',{name:'Read with AI?'}));
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Scan with AI'})));
       assert.ok(screen.getByText('Read with Gemini'));
       assert.equal(screen.getByLabelText('Item 1 quantity').value,'2');
       assert.equal(screen.getByLabelText('Discount percentage').value,'50');

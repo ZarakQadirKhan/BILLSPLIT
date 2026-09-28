@@ -264,7 +264,7 @@ export function Onboarding({ invite, onSubmit }) {
           : "Already joined? Use a recovery code"}
       </button>
       <div className="welcome-note">
-        <ShieldCheck size={14} /> No subscriptions. No paid APIs.
+        <ShieldCheck size={14} /> Payments stay between friends.
       </div>
     </section>
   );

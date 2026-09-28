@@ -14,23 +14,45 @@ const fallbackReasons = {
   model_unavailable: "The configured Gemini model is unavailable",
   invalid_result: "Gemini’s result could not be safely read",
 };
+const openaiReasons = {
+  budget_cap: "The app’s OpenAI budget has been reached",
+  daily_cap: "The app’s daily OpenAI scan limit was reached",
+  quota: "OpenAI’s quota or credit limit was reached",
+  timeout: "OpenAI took too long to respond",
+  not_configured: "OpenAI is not configured or is disabled",
+  access_denied: "OpenAI rejected the app’s API access",
+  model_unavailable: "GPT-6 Sol is unavailable for this key",
+  invalid_result: "OpenAI’s result could not be safely read",
+  preflight_failed: "OpenAI’s cost check was unavailable",
+  input_limit: "The photo exceeded the AI input limit",
+  busy: "Too many AI scans were requested in a minute",
+};
 
 export async function extractReceipt(
   blob,
   progress,
-  { useGemini = true, send = request, ocr = scanImage } = {},
+  { useAI = true, useGemini, send = request, ocr = scanImage } = {},
 ) {
   let reason = null;
-  if (useGemini) {
-    progress({ status: "Reading with Gemini", progress: 0 });
+  let openaiReason = null;
+  const cloud = useGemini ?? useAI;
+  if (cloud) {
+    progress({
+      status: "Reading with AI · OpenAI, then Gemini backup",
+      progress: 0,
+    });
     try {
       const result = await send("/scan-receipt", {
         method: "POST",
         body: blob,
-        headers: { "Content-Type": blob.type, "x-receipt-consent": "gemini" },
-        signal: AbortSignal.timeout(30000),
+        headers: {
+          "Content-Type": blob.type,
+          "x-receipt-consent": useGemini === true ? "gemini" : "openai-gemini",
+        },
+        signal: AbortSignal.timeout(75000),
       });
-      if (result.source === "gemini") {
+      openaiReason = result.openaiReason;
+      if (["openai", "gemini"].includes(result.source)) {
         // The server adds IDs and empty allocations; revalidate only extraction fields.
         const receipt = {
           ...result.receipt,
@@ -39,9 +61,13 @@ export async function extractReceipt(
           ),
         };
         return {
-          source: "gemini",
+          source: result.source,
           parsed: normalizeReceipt(receipt),
           text: "",
+          usage: result.usage,
+          fallback: openaiReason
+            ? `${openaiReasons[openaiReason] || "OpenAI is unavailable"} — read with Gemini.`
+            : "",
         };
       }
       reason = result.reason;
@@ -51,8 +77,8 @@ export async function extractReceipt(
         : "unavailable";
     }
   }
-  const fallback = useGemini
-    ? `${fallbackReasons[reason] || "Gemini is unavailable"} — used private on-device OCR.`
+  const fallback = cloud
+    ? `${openaiReason ? (openaiReasons[openaiReason] || "OpenAI is unavailable") + ". " : ""}${fallbackReasons[reason] || "AI scanning is unavailable"} — used private on-device OCR.`
     : "";
   progress({
     status: fallback || "Reading privately on this device",
@@ -61,7 +87,7 @@ export async function extractReceipt(
   const text = await ocr(blob, (update) =>
     progress({
       ...update,
-      status: `${useGemini ? "OCR fallback" : "Private OCR"}: ${update.status}`,
+      status: `${cloud ? "OCR fallback" : "Private OCR"}: ${update.status}`,
     }),
   );
   return { source: "ocr", parsed: parseReceipt(text), text, fallback };

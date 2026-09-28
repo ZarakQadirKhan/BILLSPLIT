@@ -173,22 +173,33 @@ export function createOpenAIReceiptScanner(db, options = {}) {
         await db.settleScanBudget(reservationId, chargedNano, measurement);
         safeLog({ event: "usage", model: OPENAI_MODEL, ...measurement });
       }
-      if (result.status !== "completed") return fallback("invalid_result");
+      if (result.status !== "completed") {
+        safeLog({ event: "invalid_response", check: "status", status: ["incomplete", "failed", "in_progress", "queued", "cancelled"].includes(result.status) ? result.status : "other" });
+        return fallback("invalid_result");
+      }
       const output = result.output
         ?.filter((part) => part.type === "message")
         .flatMap((part) => part.content ?? [])
         .filter((part) => part.type === "output_text")
         .map((part) => part.text)
         .join("");
-      if (!output || output.length > 150000) return fallback("invalid_result");
-      const receipt = normalizeReceipt(JSON.parse(output));
+      if (!output || output.length > 150000) {
+        safeLog({ event: "invalid_response", check: "output_text", hasOutputArray: Array.isArray(result.output), characters: output?.length ?? 0 });
+        return fallback("invalid_result");
+      }
+      stage = "json";
+      const parsed = JSON.parse(output);
+      stage = "schema";
+      const receipt = normalizeReceipt(parsed);
       safeLog({ event: "success", model: OPENAI_MODEL });
       return { source: "openai", receipt, usage: measurement };
-    } catch {
+    } catch (error) {
+      if (["json", "schema"].includes(stage)) safeLog({ event: "invalid_response", check: stage,
+        validation: /^Invalid receipt (object|list|text|flag|number|enum)( at receipt[.\w\[\]]*)?$|^Unexpected receipt field$|^Unreadable item price$/.test(error.message) ? error.message : "invalid" });
       return fallback(
         signal.aborted
           ? "timeout"
-          : stage === "response"
+          : ["response", "json", "schema"].includes(stage)
             ? "invalid_result"
             : "unavailable",
       );

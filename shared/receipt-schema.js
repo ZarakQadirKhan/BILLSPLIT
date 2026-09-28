@@ -41,38 +41,38 @@ export const receiptSchema = object({
 });
 
 // Validate the same schema sent to Gemini. Never trust model output as bill data.
-function check(value, schema) {
+function check(value, schema, path = "receipt") {
   if (value === null && [].concat(schema.type).includes("null")) return;
   const type =
     schema.type instanceof Array
       ? schema.type.find((t) => t !== "null")
       : schema.type;
   if (schema.enum && !schema.enum.includes(value))
-    throw Error("Invalid receipt enum");
+    throw Error(`Invalid receipt enum at ${path}`);
   if (type === "object") {
     if (!value || typeof value !== "object" || Array.isArray(value))
-      throw Error("Invalid receipt object");
+      throw Error(`Invalid receipt object at ${path}`);
     if (Object.keys(value).some((k) => !Object.hasOwn(schema.properties, k)))
       throw Error("Unexpected receipt field");
     for (const key of schema.required)
-      check(value[key], schema.properties[key]);
+      check(value[key], schema.properties[key], `${path}.${key}`);
   } else if (type === "array") {
     if (
       !Array.isArray(value) ||
       value.length < (schema.minItems || 0) ||
       value.length > schema.maxItems
     )
-      throw Error("Invalid receipt list");
-    value.forEach((v) => check(v, schema.items));
+      throw Error(`Invalid receipt list at ${path}`);
+    value.forEach((v) => check(v, schema.items, `${path}[]`));
   } else if (type === "string") {
     if (
       typeof value !== "string" ||
       value.length > schema.maxLength ||
       value.trim().length < (schema.minLength || 0)
     )
-      throw Error("Invalid receipt text");
+      throw Error(`Invalid receipt text at ${path}`);
   } else if (type === "boolean") {
-    if (typeof value !== "boolean") throw Error("Invalid receipt flag");
+    if (typeof value !== "boolean") throw Error(`Invalid receipt flag at ${path}`);
   } else if (
     !Number.isFinite(value) ||
     (type === "integer" && !Number.isSafeInteger(value)) ||
@@ -80,7 +80,7 @@ function check(value, schema) {
     value <= (schema.exclusiveMinimum ?? -Infinity) ||
     value > schema.maximum
   )
-    throw Error("Invalid receipt number");
+    throw Error(`Invalid receipt number at ${path}`);
 }
 
 export function normalizeReceipt(value) {

@@ -26,14 +26,13 @@ export default function BillDetails({
 }) {
   const isRide = bill.kind === "ride";
   const result = calculate(bill),
-    payer = person(bill.paidBy),
-    isPayer = user.id === bill.paidBy,
-    myDebt = debts.find((d) => d.debtor_id === user.id);
+    isPayer = result.payments.some(p => p.personId === user.id),
+    myDebts = debts.filter((d) => d.debtor_id === user.id);
   const received = debts
-      .filter((d) => d.status === "confirmed")
+      .filter((d) => d.status === "confirmed" && d.creditor_id === user.id)
       .reduce((s, d) => s + d.amount, 0),
     outstanding = debts
-      .filter((d) => d.status !== "confirmed")
+      .filter((d) => d.status !== "confirmed" && d.creditor_id === user.id)
       .reduce((s, d) => s + d.amount, 0),
     settled =
       bill.status === "published" &&
@@ -53,7 +52,7 @@ export default function BillDetails({
             <span>.</span>
           </h1>
           <p>
-            Paid by {payer.name} <span>·</span> Created by{" "}
+            Paid by {result.payments.map(p => person(p.personId).name).join(" & ")} <span>·</span> Created by{" "}
             {person(bill.creatorId).name}
           </p>
         </div>
@@ -80,9 +79,9 @@ export default function BillDetails({
             <section className="payer-banner">
               <div>
                 <span>
-                  <Wallet size={17} /> You paid the bill
+                  <Wallet size={17} /> You contributed
                 </span>
-                <strong>{money(result.total)}</strong>
+                <strong>{money(result.payments.find(p => p.personId === user.id)?.amountCents || 0)}</strong>
               </div>
               <div>
                 <span>Your own share</span>
@@ -98,8 +97,8 @@ export default function BillDetails({
               </div>
             </section>
           )}
-          {myDebt && (
-            <section className="card my-payment">
+          {myDebts.map(myDebt => { const payer = person(myDebt.creditor_id); return (
+            <section className="card my-payment" key={myDebt.id}>
               <div className="section-heading">
                 <h2>Your payment</h2>
                 <Badge status={myDebt.status} />
@@ -150,24 +149,22 @@ export default function BillDetails({
                 )}
                 {myDebt.status === "confirmed" && (
                   <span className="settled-message">
-                    <CheckCheck size={18} /> Payment received. You’re all
-                    square.
+                    <CheckCheck size={18} /> This payment has been confirmed.
                   </span>
                 )}
               </div>
             </section>
-          )}
+          ); })}
           <section className="card">
             <div className="section-heading">
               <h2>{isRide ? "Passenger payments" : "Everyone’s share"}</h2>
               <span className="badge">{bill.participants.length} people</span>
             </div>
             {bill.participants
-              .filter((personId) => !isRide || personId !== bill.paidBy)
               .map((personId, i) => {
                 const p = person(personId),
                   share = result.shares[personId],
-                  debt = debts.find((d) => d.debtor_id === personId);
+                  personDebts = debts.filter((d) => d.debtor_id === personId);
                 return (
                   <div className="participant-detail" key={personId}>
                     <div className="share-preview">
@@ -178,11 +175,11 @@ export default function BillDetails({
                           {personId === user.id && " (you)"}
                         </strong>
                         <small>
-                          {personId === bill.paidBy
-                            ? "Paid the bill · own share excluded from transfers"
-                            : !p.claimed
-                              ? "Invitation not yet accepted"
-                              : `Pays ${payer.name}`}
+                          {(() => {
+                            const incoming = debts.filter(d => d.creditor_id === personId && d.status !== 'confirmed').reduce((sum, d) => sum + d.amount, 0);
+                            const outgoing = personDebts.filter(d => d.status !== 'confirmed').reduce((sum, d) => sum + d.amount, 0);
+                            return bill.status === 'draft' ? 'Draft share' : incoming > 0 ? 'Still receives ' + money(incoming) : outgoing > 0 ? 'Still pays ' + money(outgoing) : 'Settled';
+                          })()}
                         </small>
                       </div>
                       <strong>{money(share.total)}</strong>
@@ -210,14 +207,14 @@ export default function BillDetails({
                         {money(share.fees)}
                       </p>
                     </details>
-                    {debt && (
-                      <div className="debt-footer">
+                    {personDebts.map(debt => (
+                      <div className="debt-footer" key={debt.id}><span>To {person(debt.creditor_id).name}: {money(debt.amount)}</span>
                         <Badge status={debt.status} />
                         {debt.note && (
                           <span className="debt-note">{debt.note}</span>
                         )}
                         {debt.reference && <small>Ref: {debt.reference}</small>}
-                        {isPayer && debt.status === "marked_paid" && (
+                        {debt.creditor_id === user.id && debt.status === "marked_paid" && (
                           <div className="action-row">
                             <button
                               className="button primary"
@@ -234,7 +231,7 @@ export default function BillDetails({
                           </div>
                         )}
                       </div>
-                    )}
+                    ))}
                   </div>
                 );
               })}
@@ -306,8 +303,8 @@ export default function BillDetails({
               </p>
             )}
           </section>
-          {!isPayer && (
-            <section className="card payment-destination">
+          {[...new Set(myDebts.filter(d => d.status !== "confirmed").map(d => d.creditor_id))].map(creditorId => { const payer = person(creditorId); return (
+            <section className="card payment-destination" key={creditorId}>
               <div className="section-heading">
                 <h2>Pay {payer.name}</h2>
                 <Wallet size={19} />
@@ -329,7 +326,7 @@ export default function BillDetails({
                 paid here.
               </p>
             </section>
-          )}
+          ); })}
         </aside>
       </div>
     </>

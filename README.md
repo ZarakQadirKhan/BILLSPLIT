@@ -1,6 +1,6 @@
 # Tab Together
 
-A bill-splitting app for a group of friends. Built with React, Vite, Express, MongoDB, and Tesseract.js. Optional receipt scanning uses paid GPT-6 Sol credit, then Gemini 3.8 Flash, then free on-device OCR. No payment gateway. Deployment uses Vercel Hobby and MongoDB Atlas Free; see [DEPLOYMENT.md](DEPLOYMENT.md).
+A bill-splitting app for a group of friends. Built with React, Vite, Express, MongoDB, and Tesseract.js. Optional receipt scanning uses paid GPT-6 Sol to transcribe a table and GPT-6 Luna to format JSON, with Gemini 3.8 Flash and free on-device OCR as fallbacks. Manual bills need no photo or AI. No payment gateway. Deployment uses Vercel Hobby and MongoDB Atlas Free; see [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Run it
 
@@ -101,3 +101,18 @@ The optional `read_my_balances` WebMCP tool is feature-detected in supported bro
 - Vercel deployment is prepared, but your Vercel account and a MongoDB Atlas Free database must be connected before the app can run online. See [the deployment guide](DEPLOYMENT.md).
 
 The repository itself uses no billable service. Electricity/internet and any charges imposed by your existing software subscription are outside the app's control.
+## Manual bills and multiple original payers
+
+Choose **Manual bill** on the home screen (or **Enter manually** in the editor), add items and prices, then assign items as usual. Discounts, tax and the final amount remain editable.
+
+In food or ride bills, choose **Multiple people** under **Who paid?** and enter each contribution. Contributions must exactly equal the final bill before publishing. Each person's consumption is subtracted from their contribution; net debtors repay net receivers proportionally, rounded to integer paisa. Nobody pays themselves. For example, on a Rs 900 equal three-person bill, Ali paying Rs 500 and Sara Rs 400 leaves Hamza owing Ali Rs 200 and Sara Rs 100. A contributor who paid less than their own share still owes the difference. Each transfer has its own pending/confirmed state and email workflow. Existing single-payer bills retain their original behavior.
+
+## Controlled live scanner test
+
+Automated tests mock paid providers. To explicitly run one real scan with private environment settings and the production spending guard:
+
+```sh
+node --env-file=<private-env-file> scripts/test-receipt.mjs <receipt.jpg> --confirm-paid-test
+```
+
+This outputs the temporary transcription, validated items and token-cost estimate. It never creates a bill, sends an email or persists the photo/table. It consumes configured OpenAI credit and records numeric usage in the same cumulative app budget. Do not reset the budget for testing.

@@ -12,6 +12,7 @@ export default function HomeOverview({ debts, user, person, bills, onOpen, onAct
   return <div className="simple-home">
     <div className="quick-create" aria-label="Create a shared expense">
       <button onClick={() => onCreate('food')}><Receipt size={22}/><span><strong>Split a bill</strong><small>Scan a receipt or enter items</small></span><ArrowRight size={18}/></button>
+      <button onClick={() => onCreate('manual')}><Receipt size={22}/><span><strong>Manual bill</strong><small>Enter items without a photo</small></span><ArrowRight size={18}/></button>
       <button onClick={() => onCreate('ride')}><Car size={22}/><span><strong>Split a ride</strong><small>One fare, shared equally</small></span><ArrowRight size={18}/></button>
     </div>
     <div className="simple-totals">

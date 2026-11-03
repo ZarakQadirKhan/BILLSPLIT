@@ -21,7 +21,7 @@ const openaiReasons = {
   timeout: "OpenAI took too long to respond",
   not_configured: "OpenAI is not configured or is disabled",
   access_denied: "OpenAI rejected the app’s API access",
-  model_unavailable: "GPT-6 Sol is unavailable for this key",
+  model_unavailable: "An OpenAI receipt model is unavailable for this key",
   invalid_result: "OpenAI’s result could not be safely read",
   preflight_failed: "OpenAI’s cost check was unavailable",
   input_limit: "The photo exceeded the AI input limit",
@@ -49,7 +49,7 @@ export async function extractReceipt(
           "Content-Type": blob.type,
           "x-receipt-consent": useGemini === true ? "gemini" : "openai-gemini",
         },
-        signal: AbortSignal.timeout(75000),
+        signal: AbortSignal.timeout(100000),
       });
       openaiReason = result.openaiReason;
       if (["openai", "gemini"].includes(result.source)) {
@@ -64,6 +64,7 @@ export async function extractReceipt(
           source: result.source,
           parsed: normalizeReceipt(receipt),
           text: "",
+          transcription: typeof result.transcription === "string" ? result.transcription.slice(0, 30000) : "",
           usage: result.usage,
           fallback: openaiReason
             ? `${openaiReasons[openaiReason] || "OpenAI is unavailable"} — read with Gemini.`

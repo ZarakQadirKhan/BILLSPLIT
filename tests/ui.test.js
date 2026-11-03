@@ -46,6 +46,42 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
     cleanup();
 
+    // Manual entry works without scanning; payer contributions immediately recalculate.
+    const manual={...bill,entryMode:'manual',receiptTotalCents:null};
+    manual.items[0].allocations=[{personId:'ali',quantity:1},{personId:'sara',quantity:1}];
+    render(React.createElement(BillEditor,{initial:manual,people:[user,{...sara,paymentDetails:'TEST Sara'}],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+    assert.equal(screen.queryByRole('button',{name:'Choose a photo'}),null);
+    fireEvent.click(screen.getByRole('button',{name:'Add item'}));
+    assert.ok(screen.getByLabelText('Item 2 name'));
+    cleanup();
+    render(React.createElement(BillEditor,{initial:{...bill,entryMode:'manual'},people:[user,{...sara,paymentDetails:'TEST Sara'}],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+    fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
+    fireEvent.click(screen.getByRole('button',{name:'Split all items equally'}));
+    fireEvent.click(screen.getByRole('button',{name:'Multiple people'}));
+    fireEvent.change(screen.getByLabelText('Payer 1 amount'),{target:{value:'12000'}});
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
+    fireEvent.click(screen.getByRole('button',{name:'Add another payer'}));
+    assert.equal(screen.getByLabelText('Payer 2 amount').value,'8000');
+    assert.ok(screen.getByText('Sara → Ali'));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    fireEvent.click(screen.getByRole('button',{name:'One person'}));
+    assert.equal(screen.queryByLabelText('Payer 2 amount'),null);
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    cleanup();
+
+    const {default:BillDetails}=await vite.ssrLoadModule('/src/BillDetails.jsx');
+    const hamza={id:'hamza',name:'Hamza',claimed:true,paymentDetails:''};
+    const multi=newRideBill('ali'); Object.assign(multi,{id:'multi',status:'published',creatorId:'ali',participants:['ali','sara','hamza'],fareCents:90000,payments:[{personId:'ali',amountCents:50000},{personId:'sara',amountCents:40000}]});
+    const debts=[{id:'first',bill_id:'multi',debtor_id:'hamza',creditor_id:'ali',amount:20000,status:'assigned'},{id:'second',bill_id:'multi',debtor_id:'hamza',creditor_id:'sara',amount:10000,status:'marked_paid'}];
+    let actionDebt;
+    render(React.createElement(BillDetails,{bill:multi,debts,person:pid=>[user,sara,hamza].find(p=>p.id===pid),user:hamza,onBack(){},onEdit(){},onCopy(){},onAction:d=>{actionDebt=d.id;}}));
+    assert.ok(screen.getByRole('heading',{name:'Pay Ali'}));
+    assert.ok(screen.getByRole('heading',{name:'Pay Sara'}));
+    assert.equal(screen.getAllByRole('button',{name:'I’ve paid'}).length,1);
+    fireEvent.click(screen.getByRole('button',{name:'I’ve paid'})); assert.equal(actionDebt,'first');
+    assert.ok(screen.getByText(/Pending approval from Sara. Your outstanding/));
+    cleanup();
+
     // Exercise the full file -> Gemini -> editable fields flow without any real API.
     const savedFetch=globalThis.fetch, savedBitmap=globalThis.createImageBitmap;
     const savedContext=dom.window.HTMLCanvasElement.prototype.getContext, savedBlob=dom.window.HTMLCanvasElement.prototype.toBlob;
@@ -106,7 +142,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     fireEvent.click(screen.getByRole('button',{name:/Sara/}));
     assert.match(screen.getByTestId('ride-to-collect').textContent,/600.00/);
     assert.equal(screen.getByRole('button',{name:'Send ride shares'}).disabled,false);
-    fireEvent.change(screen.getByLabelText('Who paid the driver?'),{target:{value:'sara'}});
+    fireEvent.change(screen.getByLabelText('Who paid the original bill?'),{target:{value:'sara'}});
     assert.equal(screen.getByRole('button',{name:'Send ride shares'}).disabled,true,'unconfigured payer is flagged');
     fireEvent.click(screen.getByRole('button',{name:/Ali/}));
     assert.match(screen.getByTestId('ride-to-collect').textContent,/0.00/);

@@ -62,6 +62,7 @@ export async function createApi(dataDirectory, options = {}) {
         if (bill.participants.includes(existingId)) fail('You already participate in a bill under another profile. Ask the bill creator to correct the invitation.');
         bill.participants = bill.participants.map(p => p === placeholder.id ? existingId : p);
         if (bill.paidBy === placeholder.id) bill.paidBy = existingId;
+        for (const p of bill.payments || []) if (p.personId === placeholder.id) p.personId = existingId;
         for (const item of bill.items) for (const a of item.allocations) if (a.personId === placeholder.id) a.personId = existingId;
         await db.update('bills', { id: row.id }, { $set: { data: bill, participants: bill.participants }, $inc: { version: 1 } });
       }
@@ -257,12 +258,15 @@ export async function createApi(dataDirectory, options = {}) {
       if (!row || row.creator_id !== req.user.id) fail('Bill not found.', 404);
       if (row.status !== 'draft') fail('This bill has already been sent.', 409);
       if (req.body.version !== row.version) fail('This bill changed. Reopen it before sending.', 409);
-      const bill = validateBill(row.data), result = calculate(bill), payer = await getUser(bill.paidBy);
-      if (!result.complete) fail('Assign every item, resolve the total difference, and fix calculation errors before sending.');
-      if (!payer?.claimed || !payer.payment_details.trim()) fail('The payer needs to join and save payment details first.');
+      const bill = validateBill(row.data), result = calculate(bill);
+      if (!result.complete) fail('Assign every item, make payer contributions match the total, and resolve calculation differences before sending.');
+      for (const receiver of new Set(result.transfers.map(t => t.creditorId))) {
+        const payer = await getUser(receiver);
+        if (!payer?.claimed || !payer.payment_details.trim()) fail('Everyone receiving repayments needs to join and save payment details first.');
+      }
       await db.update('bills', { id: row.id }, { $set: { status: 'published' }, $inc: { version: 1 } });
-      for (const [person, share] of Object.entries(result.shares)) if (person !== UNASSIGNED && person !== bill.paidBy && share.total > 0) await db.insert('debts', { id: randomUUID(), bill_id: row.id, debtor_id: person, creditor_id: bill.paidBy, amount: share.total, status: 'assigned', reference: '', note: '', updated_at: now() });
-      for (const p of bill.participants) await event(p, row.id, p === bill.paidBy ? `${bill.title}: your bill is ready to settle.` : `${bill.title}: ${payer.name} is waiting for you to review your share.`);
+      for (const transfer of result.transfers) await db.insert('debts', { id: randomUUID(), bill_id: row.id, debtor_id: transfer.debtorId, creditor_id: transfer.creditorId, amount: transfer.amount, status: 'assigned', reference: '', note: '', updated_at: now() });
+      for (const p of bill.participants) await event(p, row.id, `${bill.title}: review your share and repayments.`);
       for (const debt of await db.many('debts', { bill_id: row.id })) await mail.queueDebt('owed', debt, debt.debtor_id);
       return billResult(await db.one('bills', { id: row.id }));
     }); await deliver(); res.json(result);

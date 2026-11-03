@@ -6,6 +6,7 @@ import {
   createOpenAIReceiptScanner,
   createReceiptPipeline,
   conservativeCost,
+  FORMAT_MODEL,
 } from "../server/openai-receipt.js";
 import { extractReceipt } from "../src/receipt-scan.js";
 
@@ -38,13 +39,14 @@ const receipt = {
 };
 const photo = Buffer.from([255, 216, 255, 0]);
 const json = (data) => ({ ok: true, json: async () => data });
-const completion = () => ({
+const table = '| Item | Qty | Line total |\n| --- | --- | --- |\n| Drinks | 6 | 1200 |';
+const completion = (text = JSON.stringify(receipt)) => ({
   status: "completed",
   usage: { input_tokens: 2000, output_tokens: 500 },
   output: [
     {
       type: "message",
-      content: [{ type: "output_text", text: JSON.stringify(receipt) }],
+      content: [{ type: "output_text", text }],
     },
   ],
 });
@@ -65,20 +67,24 @@ test("OpenAI pipeline: shared spending guard, exact consent, failure accounting 
   const fetcher = async (url, init) => {
     const body = JSON.parse(init.body);
     calls.push(url);
-    assert.equal(body.model, "gpt-6-sol");
-    assert.equal(body.text.format.strict, true);
-    assert.match(body.instructions, /EXAMPLE A/);
-    assert.match(
-      body.input[0].content[1].image_url,
-      /^data:image\/jpeg;base64,/,
-    );
+    if (body.model === "gpt-6-sol") {
+      assert.equal(body.text, undefined);
+      assert.match(body.instructions, /ITEMS table/);
+      assert.match(body.input[0].content[1].image_url, /^data:image\/jpeg;base64,/);
+    } else {
+      assert.equal(body.model, FORMAT_MODEL);
+      assert.equal(body.text.format.strict, true);
+      assert.match(body.instructions, /EXAMPLE A/);
+      assert.deepEqual(body.input[0].content, [{ type: "input_text", text: table }]);
+    }
     if (url.endsWith("/input_tokens")) return json({ input_tokens: 2000 });
     assert.equal(body.store, false);
     assert.equal(body.max_output_tokens, 4096);
     assert.equal(body.service_tier, "default");
-    return resultFactory();
+    return resultFactory(body.model);
   };
-  resultFactory = () => json(completion());
+  const success = model => json(completion(model === "gpt-6-sol" ? table : JSON.stringify(receipt)));
+  resultFactory = success;
   const gemini = async () => {
     geminiCalls++;
     return { source: "gemini", receipt };
@@ -95,7 +101,7 @@ test("OpenAI pipeline: shared spending guard, exact consent, failure accounting 
     );
     await db.remove("ai_usage", {});
     await db.remove("rate_limits", {});
-    resultFactory = () => json(completion());
+    resultFactory = success;
   };
   await t.test(
     "OpenAI succeeds first and charges measured tokens; no images persisted",
@@ -104,9 +110,12 @@ test("OpenAI pipeline: shared spending guard, exact consent, failure accounting 
       assert.equal(result.source, "openai");
       assert.equal(geminiCalls, 0);
       assert.equal(result.receipt.items[0].unitPriceCents, 20000);
-      assert.equal(result.usage.estimatedCostUsd, 0.01);
+      assert.equal(result.transcription, table);
+      assert.equal(calls.length, 4, 'count and generate for each stage');
+      assert.equal(result.usage.estimatedCostUsd, 0.0105);
+      assert.equal(result.usage.stages.length, 2);
       const budget = await db.one("ai_budget", { id: "openai-lifetime" });
-      assert.equal(budget.chargedNano, conservativeCost(2000, 500));
+      assert.equal(budget.chargedNano, conservativeCost(2000, 500) + conservativeCost(2000, 500, FORMAT_MODEL));
       const row = (await db.many("ai_usage"))[0];
       assert.deepEqual(
         Object.keys(row).sort(),
@@ -248,6 +257,25 @@ test("OpenAI pipeline: shared spending guard, exact consent, failure accounting 
       }
     },
   );
+  await t.test('formatter failure accounts for both stages and falls back once', async () => {
+    await reset();
+    resultFactory = model => model === 'gpt-6-sol' ? success(model) : json(completion('{}'));
+    const result = await pipeline(photo,'image/jpeg','u','openai-gemini');
+    assert.equal(result.source,'gemini'); assert.equal(geminiCalls,1); assert.equal(calls.length,4);
+    assert.equal((await db.one('ai_budget',{id:'openai-lifetime'})).chargedNano,conservativeCost(2000,500)+conservativeCost(2000,500,FORMAT_MODEL));
+  });
+  await t.test('second stage refuses a reservation that would exceed the remaining budget', async () => {
+    await reset();
+    const limited = createOpenAIReceiptScanner(db,{...scannerOptions,budgetUsd:0.054});
+    // Simulate concurrent consumption after transcription, before formatting.
+    resultFactory = async model => {
+      const response=success(model);
+      if(model==='gpt-6-sol') await db.update('ai_budget',{id:'openai-lifetime'},{$inc:{chargedNano:41000000}});
+      return response;
+    };
+    const result=await limited(photo,'image/jpeg','u');
+    assert.equal(result.reason,'budget_cap'); assert.equal(calls.length,3,'no formatting generation');
+  });
   await t.test(
     "failed token preflight never authorizes generation",
     async () => {

@@ -50,9 +50,11 @@ test('MongoDB: settlement, rides, permissions, concurrent actions and durable hi
   // A claimed invitation can attach an existing account while keeping assignments intact.
   const invite = (await call('/friends', ali.token, { name:'Existing member' })).data;
   const another = newBill(ali.user.id); another.title='Next dinner'; another.participants.push(invite.person.id); another.items=[{ id:'pizza',name:'Pizza',quantity:1,unitPriceCents:10000,eligible:true,allocations:[{personId:invite.person.id,quantity:1}]}];
+  another.payments=[{personId:invite.person.id,amountCents:10000}];
   const anotherSaved = (await call('/bills',ali.token,{bill:another})).data;
   assert.equal((await call(`/invite/${invite.inviteToken}/claim`,stranger.token,{})).status,200);
   const updated = (await call('/state',ali.token)).data.bills.find(x=>x.id===anotherSaved.id); assert.ok(updated.participants.includes(stranger.user.id)); assert.equal(calculate(updated).shares[stranger.user.id].total,10000);
+  assert.deepEqual(updated.payments,[{personId:stranger.user.id,amountCents:10000}],'invitation claim preserves payer contributions');
   // Equal ride fare, payer exemption, tamper resistance, direct paid button flow.
   const ride = newRideBill(ali.user.id); ride.title='inDrive to home'; ride.participants=[ali.user.id,sara.user.id,stranger.user.id]; ride.fareCents=100001;
   ride.items=[{id:'tampered',name:'Unequal fare',quantity:1,unitPriceCents:1,allocations:[]}];
@@ -79,6 +81,25 @@ test('MongoDB: settlement, rides, permissions, concurrent actions and durable hi
   assert.deepEqual(sameUsername.map(r=>r.status).sort(),[201,409]);
   assert.equal((await call('/state',ali.token)).data.debts.find(d=>d.id===debt.id).paymentStatus,'paid');
   assert.equal((await call('/state',ali.token)).data.debts.find(d=>d.id===rideDebt.id).paymentStatus,'pending_confirmation');
+  // Two original payers, one debtor, and independently confirmed repayments.
+  await call('/profile',sara.token,{name:'Sara',paymentDetails:'TEST Sara account'},'PATCH');
+  const multi=newRideBill(ali.user.id); multi.participants=[ali.user.id,sara.user.id,stranger.user.id]; multi.fareCents=90000;
+  multi.payments=[{personId:ali.user.id,amountCents:50000},{personId:sara.user.id,amountCents:39000}];
+  let ms=(await call('/bills',ali.token,{bill:multi})).data;
+  assert.equal((await call(`/bills/${ms.id}/publish`,ali.token,{version:ms.version})).status,400,'cannot publish unmatched contributions');
+  multi.payments[1].amountCents=40000;
+  ms=(await call(`/bills/${ms.id}`,ali.token,{bill:multi,version:ms.version},'PUT')).data;
+  assert.equal((await call(`/bills/${ms.id}/publish`,ali.token,{version:ms.version})).status,200);
+  const md=(await call('/state',stranger.token)).data.debts.filter(d=>d.bill_id===ms.id);
+  assert.equal(md.length,2); assert.ok(md.every(d=>d.debtor_id===stranger.user.id));
+  const toAli=md.find(d=>d.creditor_id===ali.user.id), toSara=md.find(d=>d.creditor_id===sara.user.id);
+  assert.equal(toAli.amount,20000); assert.equal(toSara.amount,10000);
+  await call(`/debts/${toAli.id}/action`,stranger.token,{action:'paid'});
+  assert.equal((await call(`/debts/${toAli.id}/action`,sara.token,{action:'confirm'})).status,403);
+  assert.equal((await call(`/debts/${toAli.id}/action`,ali.token,{action:'confirm'})).data.status,'confirmed');
+  assert.equal((await db.one('debts',{id:toSara.id})).status,'assigned','other creditor still unpaid');
+  await call(`/debts/${toSara.id}/action`,stranger.token,{action:'paid'});
+  assert.equal((await call(`/debts/${toSara.id}/action`,sara.token,{action:'confirm'})).data.status,'confirmed');
   // Private fields cannot be embedded in a saved bill as client extras.
   const injected={...ride,title:'Sanitized',receiptId:'old-photo',image:'data:image/png;base64,SECRET',extra:{blob:'SECRET'}};
   injected.items[0].photo='SECRET';

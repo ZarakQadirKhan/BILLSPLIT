@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Utensils,
   Car,
+  Pencil,
 } from "lucide-react";
 import {
   calculate,
@@ -143,7 +144,7 @@ export default function App() {
   const unread = state?.events.filter((e) => !e.is_read).length || 0;
   const startBill = () => setModal({ type: "billType" });
   const startSelectedBill = (kind) => {
-    setEditor(kind === "ride" ? newRideBill(user.id) : newBill(user.id));
+    setEditor(kind === "ride" ? newRideBill(user.id) : { ...newBill(user.id), entryMode: kind === "manual" ? "manual" : "scan" });
     setDetailId(null);
     setModal(null);
   };
@@ -713,6 +714,7 @@ export default function App() {
               </span>
               <ChevronRight size={18} />
             </button>
+            <button onClick={() => startSelectedBill("manual")}><span className="scan-icon"><Pencil size={25}/></span><span><strong>Manual bill</strong><small>Enter items and prices without a photo.</small></span><ChevronRight size={18}/></button>
             <button onClick={() => startSelectedBill("ride")}>
               <span className="scan-icon">
                 <Car size={25} />
@@ -867,7 +869,7 @@ function BillList({ bills, debts, person, onOpen, onCreate }) {
               <small>
                 {shortDate(b.date)} <span>·</span> {b.participants.length}{" "}
                 {b.participants.length === 1 ? "person" : "people"}{" "}
-                <span>·</span> Paid by {person(b.paidBy).name}
+                <span>·</span> Paid by {(b.payments || [{ personId: b.paidBy }]).map(p => person(p.personId).name).join(" & ")}
               </small>
             </span>
             <span className="bill-row-right">

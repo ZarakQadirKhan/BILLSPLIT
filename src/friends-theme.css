@@ -675,3 +675,15 @@ h1 {
     bottom: calc(96px + env(safe-area-inset-bottom));
   }
 }
+.contribution-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; align-items: end; gap: 12px; margin: 16px 0; }
+.contribution-row label, .contribution-row input, .contribution-row select { min-width: 0; width: 100%; }
+.contribution-row .icon-button { min-width: 44px; min-height: 44px; }
+.transfer-summary .share-preview { flex-wrap: wrap; gap: 8px; }
+.transfer-summary .share-preview > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .contribution-row { grid-template-columns: minmax(0, 1fr) 44px; }
+  .contribution-row label:first-child { grid-column: 1 / -1; }
+  .contribution-row input, .contribution-row select { font-size: 16px; }
+  .quick-create { grid-template-columns: 1fr !important; }
+}
+.receipt-transcription { max-width: 100%; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }

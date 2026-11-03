@@ -23,3 +23,30 @@ test('inDrive fare stays equal when passengers or payer change, with exact round
   const canonical=validateBill(ride); assert.equal(canonical.items[0].allocations.length,3); assert.equal(canonical.discount.type,'none'); assert.equal(calculate(canonical).total,100001);
   ride.fareCents=-1; assert.throws(()=>validateBill(ride),/fare/);
 });
+test('multiple payers net their own shares and divide repayments between receivers', () => {
+  const b = newRideBill('ali'); b.participants = ['ali', 'sara', 'hamza']; b.fareCents = 90000;
+  b.payments = [{personId:'ali',amountCents:50000},{personId:'sara',amountCents:40000}];
+  const r = calculate(validateBill(b));
+  assert.equal(r.complete,true);
+  assert.deepEqual(r.balances,{ali:20000,sara:10000,hamza:-30000});
+  assert.deepEqual(r.transfers,[{debtorId:'hamza',creditorId:'ali',amount:20000},{debtorId:'hamza',creditorId:'sara',amount:10000}]);
+  b.payments[0].amountCents = 10000; b.payments[1].amountCents = 80000;
+  assert.deepEqual(calculate(b).transfers,[{debtorId:'ali',creditorId:'sara',amount:20000},{debtorId:'hamza',creditorId:'sara',amount:30000}]);
+  b.payments[1].amountCents = 79000;
+  assert.equal(calculate(b).complete,false); assert.equal(calculate(b).paymentDifference,1000); assert.deepEqual(calculate(b).transfers,[]);
+  for(const payments of [[],[{personId:'other',amountCents:90000}],[{personId:'ali',amountCents:-1}],[{personId:'ali',amountCents:1.5}],[{personId:'ali',amountCents:1},{personId:'ali',amountCents:89999}]]) {
+    assert.throws(()=>validateBill({...b,payments}));
+  }
+});
+test('multi-payer settlement conserves every balance over 499 unequal, rounded bills', () => {
+  for(let i=1;i<500;i++) {
+    const b = fixture(); b.items[0].unitPriceCents=i*71;
+    b.discount={...b.discount,type:'percent',rate:17.5}; b.tax={...b.tax,type:'percent',rate:7.5};
+    const total=calculate(b).total;
+    b.payments=[{personId:'ali',amountCents:Math.floor(total*i/500)},{personId:'sara',amountCents:total-Math.floor(total*i/500)}];
+    const r=calculate(validateBill(b)); assert.equal(r.complete,true);
+    const net={...r.balances};
+    for(const t of r.transfers) { assert.notEqual(t.debtorId,t.creditorId); assert.ok(Number.isSafeInteger(t.amount)&&t.amount>0); net[t.debtorId]+=t.amount; net[t.creditorId]-=t.amount; }
+    assert.ok(Object.values(net).every(x=>x===0));
+  }
+});

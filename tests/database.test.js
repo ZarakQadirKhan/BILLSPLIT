@@ -4,6 +4,7 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
 import { migrateLegacy } from '../server/migrate-legacy.js';
 import { newBill } from '../shared/calculations.js';
 import { openDatabase } from '../server/database.js';
+import { MongoClient } from 'mongodb';
 
 test('runtime refuses missing or malformed MongoDB credentials', async () => {
   await assert.rejects(openDatabase(undefined,{uri:''}),/Persistent database missing/);
@@ -43,4 +44,18 @@ test('MongoDB transactions roll back and usernames are unique at database level'
     assert.equal(JSON.stringify(legacy),original,'source data is untouched');
     await assert.rejects(migrateLegacy(source,migrationDb),/empty destination/);
   } finally {if(db)await db.close();if(migrationDb)await migrationDb.close();await replica.stop();}
+});
+test('legacy debt index migrates without changing existing payments', async () => {
+  const replica=await MongoMemoryReplSet.create({replSet:{count:1}});
+  const client=new MongoClient(replica.getUri()); let db;
+  try {
+    await client.connect(); const debts=client.db('index_test').collection('debts');
+    await debts.createIndex({bill_id:1,debtor_id:1},{unique:true});
+    const old={id:'old',bill_id:'bill',debtor_id:'a',creditor_id:'b',amount:100,status:'confirmed'};
+    await debts.insertOne({...old});
+    db=await openDatabase(null,{uri:replica.getUri(),databaseName:'index_test'});
+    assert.deepEqual(await db.one('debts',{id:'old'}),old);
+    await db.insert('debts',{...old,id:'new',creditor_id:'c',status:'assigned'});
+    await assert.rejects(db.insert('debts',{...old,id:'duplicate'}),e=>e.code===11000);
+  } finally { if(db) await db.close(); await client.close(); await replica.stop(); }
 });

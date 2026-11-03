@@ -22,6 +22,7 @@ import { request, prepareImage } from "./api.js";
 import { extractReceipt } from "./receipt-scan.js";
 import { Avatar, Breakdown, MoneyInput, Empty, Modal } from "./ui.jsx";
 import ItemAssignments from "./ItemAssignments.jsx";
+import { PayerPicker, TransferSummary, receiversReady } from "./Payers.jsx";
 import { assignedQuantity, equalAllocations } from "../shared/allocations.js";
 
 export default function BillEditor({
@@ -36,8 +37,10 @@ export default function BillEditor({
 }) {
   const [bill, setBill] = useState(() => structuredClone(initial)),
     [step, setStep] = useState("review"),
+    [entryMode, setEntryMode] = useState(initial.entryMode || "scan"),
     [image, setImage] = useState(""),
     [raw, setRaw] = useState(""),
+    [transcription, setTranscription] = useState(""),
     [scanMode, setScanMode] = useState("ai"),
     [scanSource, setScanSource] = useState(""),
     [scanNotice, setScanNotice] = useState(""),
@@ -49,7 +52,6 @@ export default function BillEditor({
   const fileRef = useRef(),
     consentResolver = useRef(),
     result = calculate(bill),
-    payer = people.find((p) => p.id === bill.paidBy),
     participants = people.filter((p) => bill.participants.includes(p.id));
   const change = (patch) => setBill((current) => ({ ...current, ...patch }));
   const finishConsent = (choice) => {
@@ -122,6 +124,7 @@ export default function BillEditor({
     }));
   };
   const applyText = (text) => {
+    setTranscription("");
     applyParsed(parseReceipt(text));
     setScanSource("Text extraction");
     setScanNotice("");
@@ -138,6 +141,7 @@ export default function BillEditor({
     setError("");
     setScanNotice("");
     setScanSource("");
+    setTranscription("");
     setProgress({ status: "Preparing your receipt", progress: 0 });
     try {
       const blob = await prepareImage(file);
@@ -155,10 +159,11 @@ export default function BillEditor({
       }
       const extraction = await extractReceipt(blob, setProgress, { useAI });
       setRaw(extraction.text);
+      setTranscription(extraction.transcription || "");
       applyParsed(extraction.parsed);
       setScanSource(
         extraction.source === "openai"
-          ? "Read with GPT-6 Sol"
+          ? "Read with GPT-6 Sol · formatted with Luna"
           : extraction.source === "gemini"
             ? "Read with Gemini"
             : "Read with on-device OCR",
@@ -191,7 +196,7 @@ export default function BillEditor({
     });
   const toggleParticipant = (personId) => {
     if (bill.participants.includes(personId)) {
-      if (personId === bill.paidBy) return;
+      if (result.payments.some(p => p.personId === personId)) return;
       change({
         participants: bill.participants.filter((p) => p !== personId),
         items: bill.items.map((item) => ({
@@ -316,9 +321,14 @@ export default function BillEditor({
                     <ReceiptMark /> The receipt
                   </h2>
                   <span className="badge">
-                    {scanSource || "AI + OCR backup"}
+                    {entryMode === "manual" ? "Manual entry" : scanSource || "AI + OCR backup"}
                   </span>
                 </div>
+                <div className="tabs" role="group" aria-label="Bill entry method">
+                  <button className={entryMode === "scan" ? "active" : ""} onClick={() => setEntryMode("scan")}>Scan a receipt</button>
+                  <button className={entryMode === "manual" ? "active" : ""} onClick={() => setEntryMode("manual")}>Enter manually</button>
+                </div>
+                {entryMode === "manual" ? <p className="muted">Give the bill a name, add each item and price below, then choose who had what. No photo needed.</p> : <>
                 <label className="scan-mode">
                   Receipt reader
                   <select
@@ -334,7 +344,7 @@ export default function BillEditor({
                 </label>
                 <p className="footnote">
                   {scanMode === "ai"
-                    ? "GPT-6 Sol first, Gemini backup, then private OCR. You’ll review the photo before sharing it. Our app never saves receipt photos."
+                    ? "GPT-6 Sol reads the photo; Luna formats the details. Gemini and private OCR are backups. You’ll review the photo before sharing it. Our app never saves receipt photos."
                     : "Private mode keeps the photo on your device. No image is sent to AI providers or our server."}
                 </p>
                 {scanNotice && (
@@ -394,6 +404,7 @@ export default function BillEditor({
                     )}
                   </div>
                 </div>
+                {transcription && <details className="ocr-text"><summary>See what AI read</summary><p className="muted">Temporary transcription for comparison. Correct the editable items below; this table is not saved with the bill.</p><pre className="receipt-transcription">{transcription}</pre></details>}
                 <details className="ocr-text">
                   <summary>Paste or review receipt text</summary>
                   <p className="muted">
@@ -425,6 +436,7 @@ export default function BillEditor({
                     Extract items from text
                   </button>
                 </details>
+                </>}
                 {warnings.length > 0 && (
                   <div className="scan-warnings">
                     {warnings.map((warning, i) => (
@@ -867,52 +879,7 @@ export default function BillEditor({
                     </button>
                   ))}
                 </div>
-                <div className="payer-select">
-                  <label>
-                    Who paid the original bill?
-                    <select
-                      value={bill.paidBy}
-                      onChange={(e) => change({ paidBy: e.target.value })}
-                    >
-                      {participants.map((p) => (
-                        <option value={p.id} key={p.id}>
-                          {p.name}
-                          {p.username ? ` (@${p.username})` : ""}
-                          {p.id === user.id ? " (you)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <small>
-                    The payer’s own share is automatically excluded from what
-                    they’re owed.
-                  </small>
-                </div>
-                {!payer?.claimed ? (
-                  <div className="notice">
-                    <AlertCircle size={17} />
-                    <span>
-                      The payer must accept their invitation and add payment
-                      details before you send this bill.
-                    </span>
-                  </div>
-                ) : (
-                  !payer.paymentDetails && (
-                    <div className="notice">
-                      <AlertCircle size={17} />
-                      <span>
-                        {payer.id === user.id
-                          ? "Add your payment details so friends know where to transfer."
-                          : `${payer.name} needs to add their payment details.`}
-                      </span>
-                      {payer.id === user.id && (
-                        <button className="text-button" onClick={onProfile}>
-                          Add details
-                        </button>
-                      )}
-                    </div>
-                  )
-                )}
+                <PayerPicker bill={bill} result={result} people={people} change={change} onProfile={onProfile}/>
               </section>
               <section className="card">
                 <div className="section-heading">
@@ -1002,9 +969,7 @@ export default function BillEditor({
                           {p.id === user.id && " (you)"}
                         </strong>
                         <small>
-                          {p.id === bill.paidBy
-                            ? "Payer · no transfer to themselves"
-                            : `Pays ${payer?.name}`}
+                          {result.balances[p.id] > 0 ? "Receives " + money(result.balances[p.id]) : result.balances[p.id] < 0 ? "Still pays " + money(-result.balances[p.id]) : "Already covered"}
                         </small>
                         <small>
                           Items {money(share.items)} − discount{" "}
@@ -1099,20 +1064,7 @@ export default function BillEditor({
                     </small>
                   )}
                 </div>
-                <div className="payer-summary">
-                  <span>{payer?.name} paid</span>
-                  <strong>{money(result.total)}</strong>
-                  <span>Their own share</span>
-                  <strong>
-                    −{money(result.shares[bill.paidBy]?.total || 0)}
-                  </strong>
-                  <span>They should receive</span>
-                  <strong>
-                    {money(
-                      result.total - (result.shares[bill.paidBy]?.total || 0),
-                    )}
-                  </strong>
-                </div>
+                <TransferSummary result={result} people={people}/>
               </>
             )}
             {result.errors.map((e, i) => (
@@ -1135,8 +1087,7 @@ export default function BillEditor({
                   onClick={() => save(true)}
                   disabled={
                     !result.complete ||
-                    !payer?.claimed ||
-                    !payer?.paymentDetails ||
+                    !receiversReady(result, people) ||
                     busy ||
                     !!progress
                   }
@@ -1192,8 +1143,7 @@ export default function BillEditor({
             className="button primary"
             disabled={
               !result.complete ||
-              !payer?.claimed ||
-              !payer?.paymentDetails ||
+              !receiversReady(result, people) ||
               busy ||
               !!progress
             }

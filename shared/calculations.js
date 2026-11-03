@@ -40,6 +40,30 @@ export function normalizeBill(bill) {
     deliveryCents: 0, serviceCents: 0, tipCents: 0, adjustmentCents: 0, adjustmentReason: '', chargeSplit: 'equal', receiptTotalCents: bill.fareCents, receiptId: null,
   };
 }
+// Old bills implicitly have one payer. Explicit contributions are independent of shares.
+export function billPayments(bill, total) {
+  return Array.isArray(bill.payments) ? bill.payments : [{ personId: bill.paidBy, amountCents: total }];
+}
+export function settlement(bill, total, shares) {
+  const payments = billPayments(bill, total);
+  const paid = Object.fromEntries((bill.participants || []).map(p => [p, 0]));
+  for (const p of payments) paid[p.personId] = (paid[p.personId] || 0) + p.amountCents;
+  const paymentDifference = total - payments.reduce((sum, p) => sum + p.amountCents, 0);
+  const balances = Object.fromEntries((bill.participants || []).map(p => [p, paid[p] - (shares[p]?.total || 0)]));
+  const credits = Object.fromEntries(Object.entries(balances).filter(([, amount]) => amount > 0));
+  const transfers = [];
+  // Match net balances, avoiding self-payments and circular repayments. Each debtor
+  // pays receivers proportionally; largest remainder conserves every paisa.
+  if (paymentDifference === 0 && !(shares[UNASSIGNED]?.total)) {
+    for (const [debtorId, balance] of Object.entries(balances)) if (balance < 0) {
+      for (const [creditorId, amount] of Object.entries(distribute(-balance, credits))) if (amount > 0 && creditorId !== UNASSIGNED) {
+        transfers.push({ debtorId, creditorId, amount });
+        credits[creditorId] -= amount;
+      }
+    }
+  }
+  return { payments, balances, transfers, paymentDifference };
+}
 export function calculate(bill) {
   bill = normalizeBill(bill);
   const errors = [], shares = {}, eligibleShares = {};
@@ -90,7 +114,8 @@ export function calculate(bill) {
   const total = subtotal - discount + tax + fees;
   const unassigned = shares[UNASSIGNED].total;
   const receiptDifference = bill.receiptTotalCents == null ? 0 : bill.receiptTotalCents - total;
-  return { subtotal, eligibleSubtotal, eligibleBase, discount, taxable, tax, fees, total, shares, unassigned, unassignedUnits, assigned: total - unassigned, receiptDifference, errors, complete: !errors.length && unassigned === 0 && unassignedUnits < 0.000001 && receiptDifference === 0 && total > 0 && (bill.items || []).length > 0 };
+  const settled = settlement(bill, total, shares);
+  return { subtotal, eligibleSubtotal, eligibleBase, discount, taxable, tax, fees, total, shares, unassigned, unassignedUnits, assigned: total - unassigned, receiptDifference, ...settled, errors, complete: !errors.length && unassigned === 0 && unassignedUnits < 0.000001 && receiptDifference === 0 && settled.paymentDifference === 0 && total > 0 && (bill.items || []).length > 0 };
 }
 export function validateBill(bill) {
   if (!bill || typeof bill !== 'object') throw Error('Invalid bill.');
@@ -104,6 +129,10 @@ export function validateBill(bill) {
   if (!Array.isArray(bill.participants) || !bill.participants.length || bill.participants.length > 50 || new Set(bill.participants).size !== bill.participants.length) throw Error('Choose 1–50 unique participants.');
   if (bill.participants.some(person => !str(person, 100) || !person) || !str(bill.paidBy, 100)) throw Error('Choose valid participants.');
   if (!bill.participants.includes(bill.paidBy)) throw Error('The payer must be a participant.');
+  if (bill.payments != null) {
+    if (!Array.isArray(bill.payments) || !bill.payments.length || bill.payments.length > 50 || new Set(bill.payments.map(p => p?.personId)).size !== bill.payments.length) throw Error('Choose unique payers.');
+    for (const p of bill.payments) if (!p || !bill.participants.includes(p.personId) || !cents(p.amountCents)) throw Error('Enter a valid amount for each payer.');
+  }
   if (!Array.isArray(bill.items) || bill.items.length > 200) throw Error('A bill can contain up to 200 items.');
   const ids = new Set();
   for (const item of bill.items) {
@@ -126,6 +155,7 @@ export function validateBill(bill) {
   // Only persist the reviewed bill fields, never client metadata or image blobs.
   const stored = Object.fromEntries(Object.keys(newBill(bill.paidBy)).map(key => [key, bill[key]]));
   stored.kind = bill.kind || 'food';
+  if (Array.isArray(bill.payments)) stored.payments = bill.payments.map(({ personId, amountCents }) => ({ personId, amountCents }));
   stored.receiptId = null;
   if (bill.kind === 'ride') stored.fareCents = bill.fareCents;
   stored.items = bill.items.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, unitPriceCents: item.unitPriceCents, lineTotalCents: item.lineTotalCents ?? null, eligible: item.eligible !== false, allocations: item.allocations.map(({ personId, quantity }) => ({ personId, quantity })) }));

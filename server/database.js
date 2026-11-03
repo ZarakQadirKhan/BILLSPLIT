@@ -18,7 +18,11 @@ export async function openDatabase(_directory, options = {}) {
     await mongo.collection('invitations').createIndex({ person_id: 1 }, { unique: true });
     await mongo.collection('bills').createIndex({ creator_id: 1, created_at: -1 });
     await mongo.collection('bills').createIndex({ participants: 1, status: 1 });
-    await mongo.collection('debts').createIndex({ bill_id: 1, debtor_id: 1 }, { unique: true });
+    await mongo.collection('debts').createIndex({ bill_id: 1, debtor_id: 1, creditor_id: 1 }, { unique: true });
+    // Replace only the legacy uniqueness constraint, after installing its successor.
+    // No debt documents change; old bills continue to have their original creditor.
+    try { await mongo.collection('debts').dropIndex('bill_id_1_debtor_id_1'); }
+    catch (error) { if (error.code !== 27) throw error; }
     await mongo.collection('debts').createIndex({ creditor_id: 1, status: 1 });
     await mongo.collection('debts').createIndex({ debtor_id: 1, status: 1 });
     await mongo.collection('events').createIndex({ user_id: 1, created_at: -1 });

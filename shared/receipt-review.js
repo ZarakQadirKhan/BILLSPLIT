@@ -1,0 +1,27 @@
+export function receiptReviewErrors(bill) {
+  const errors=[];
+  const review=bill.receiptReview;
+  if(review?.options?.length && review.selectedOption==null) errors.push('Choose the card or cash option, or enter your own tax.');
+  if(review?.needsTotal && bill.receiptTotalCents==null) errors.push('Enter the final amount actually charged.');
+  for(const item of bill.items||[]) if(item.priceMissing) errors.push(`Enter the price for ${item.name || 'this item'}, or confirm it was free.`);
+  return errors;
+}
+
+export function validateReceiptReview(review) {
+  if(!review || typeof review!=='object' || typeof review.needsTotal!=='boolean' || !Array.isArray(review.options) || review.options.length>6) throw Error('Invalid receipt review.');
+  if(review.selectedOption!==null && review.selectedOption!=='manual' && (!Number.isInteger(review.selectedOption)||review.selectedOption<0||review.selectedOption>=review.options.length)) throw Error('Invalid receipt choice.');
+  const options=review.options.map(o=>{
+    if(!o || typeof o.label!=='string'||!o.label.trim()||o.label.length>80) throw Error('Invalid receipt option.');
+    for(const field of ['taxCents','receiptTotalCents']) if(o[field]!==null&&(!Number.isSafeInteger(o[field])||o[field]<0||o[field]>10000000000)) throw Error('Invalid receipt option amount.');
+    if(o.taxRate!==null&&(!Number.isFinite(o.taxRate)||o.taxRate<0||o.taxRate>100)) throw Error('Invalid receipt option tax.');
+    if(![null,'before','after'].includes(o.taxBasis)) throw Error('Invalid receipt option tax basis.');
+    return {label:o.label,taxCents:o.taxCents,taxRate:o.taxRate,taxBasis:o.taxBasis,receiptTotalCents:o.receiptTotalCents};
+  });
+  return {needsTotal:review.needsTotal,selectedOption:review.selectedOption,options};
+}
+
+export function chooseReceiptOption(bill,index) {
+  if(index==='manual') return {...bill,receiptReview:{...bill.receiptReview,selectedOption:'manual'}};
+  const option=bill.receiptReview.options[index];
+  return {...bill,tax:{type:option.taxCents!=null?'fixed':'percent',amountCents:option.taxCents??0,rate:option.taxRate??0,basis:option.taxBasis||'after'},receiptTotalCents:option.receiptTotalCents,receiptReview:{...bill.receiptReview,selectedOption:index,needsTotal:true}};
+}

@@ -36,8 +36,14 @@ Local HTTP is for trusted Wi-Fi testing. HTTPS is needed for confidential traffi
 5. Check every extracted field. Edit quantities, unit prices, line totals, discounts, tax, fees, and the actual charged amount. A manual line-total override is labeled; editing quantity or unit price restores automatic line arithmetic.
 6. Add participants and select the original payer. Assign item quantities or share an item equally, including fractional quantities. Unassigned and over-assigned items are flagged. The payer must have joined and saved transfer instructions before sending.
 7. Save a private draft or send shares. Sending is blocked until all item units are assigned, the calculated and entered receipt totals agree, and no share is negative. Published bills are locked; their money amounts are recalculated and validated on the server.
-8. Each participant can accept or question their share, or directly choose **I’ve paid** on any unpaid transaction after transferring outside the app. Marking paid includes an optional reference and no longer requires a separate acceptance click. The payer confirms receipt or rejects the claim with a note. **A marked-paid share remains outstanding until the payer confirms it.**
-9. Overview shows both money owed and money to collect. Activity contains persistent notifications, refreshed every 30 seconds while the app is visible. Confirmed payments appear under **Paid history** and settled bills remain in history.
+8. After transferring outside the app, choose **I’ve paid**, select the bills, and enter the amount actually paid. Partial payments are supported. A transfer can cover multiple bills owed to the same friend, applied in the order shown. The recipient confirms the whole report or rejects it with a note. Only confirmation reduces the debt; pending amounts are reserved so they cannot be reported twice.
+9. Overview groups outstanding bills by friend. **Still to pay** excludes both confirmed and pending amounts; **Pending** shows money already reported, with a warning not to pay again. Recipients see approval cards. Confirmed transfers appear under **Paid**, including partial payments. Activity contains persistent notifications, refreshed every 30 seconds while the app is visible.
+
+Unfinished food and ride bills autosave on the current device. Resume them from **Pick up where you left off**. This works for incomplete fields, saves on backgrounding/leaving, and never stores photos, raw OCR text or model transcripts. Clearing browser storage removes these local drafts; **Save draft** explicitly saves a validated draft to MongoDB for access from another device.
+
+Assignment controls include **Only show unassigned items**, a sticky remaining count, collapsed completed items, **Split all items equally**, and one-step **Undo assignment**. Undo restores quantities assigned to people while preserving later price edits.
+
+When AI sees unresolved card/cash tax alternatives, it returns both for the editor to present as choices. Selecting one updates tax and any readable final total. Missing prices and unreadable totals become explicit questions and block publication until resolved. A clipped total is never invented. Manual bills do not require a receipt total.
 
 ## inDrive rides
 
@@ -51,7 +57,7 @@ Add an email address during signup or in Profile, then enter the emailed six-dig
 
 - A published share emails the person who owes money, once their email is verified. Pending invitees receive a catch-up notification after joining and verifying.
 - **I’ve paid** changes the display to **Pending approval** and emails the recipient to check their actual bank/wallet/cash receipt.
-- Only that signed-in recipient can select **Confirm received**. The debt then shows **Paid** for both people, moves to Paid history, and both receive confirmation emails.
+- Only that signed-in recipient can select **Confirm received**. Both receive a confirmation email for that amount. A partial payment reduces the remaining balance; the debt becomes fully paid only after all its amounts are confirmed. Combined transfers are approved together, with an itemized bill breakdown.
 - **Not received** keeps the debt unpaid and emails the debtor to review the note.
 - Email links open the bill; opening a link never approves a payment. There is no gateway, card collection, bank connection, or money transfer in the app.
 
@@ -74,7 +80,7 @@ All stored money is integer **paisa**. Percentage calculations round once to pai
 
 ## Data and privacy
 
-All active application data is stored in your MongoDB database: profiles, hashed sessions/recovery codes, invitations, bills, debts, and activity. Each debt is stored once with debtor and creditor IDs, integer-paisa amount, and a status. The API derives `paymentStatus` as `unpaid`, `pending_confirmation`, or `paid` from that status, so flags cannot disagree. Transactions keep notifications and settlements consistent. Browser sessions remain in localStorage. OCR assets and fonts do not depend on external CDNs.
+Shared application data is stored in MongoDB: profiles, hashed sessions/recovery codes, invitations, saved bills, debts, repayment reports, and activity. Each debt retains its original integer-paisa amount plus confirmed and pending amounts. Repayment reports record their bill allocations, recipient, reference and approval status. MongoDB transactions atomically update all allocations and email notifications. Request IDs prevent a retried report from recording the same transfer twice. Older debts without the new counters remain compatible. Browser sessions and unfinished device drafts remain in localStorage; photos do not. OCR assets and fonts do not depend on external CDNs.
 
 The old `data/tab-together.sqlite` file and existing local photos are untouched and ignored by Git. They are not automatically moved to MongoDB. An explicit migration script can copy existing accounts/bills without uploading photos; see the deployment guide. Back up the old data directory with the old server stopped before migrating.
 
@@ -87,20 +93,20 @@ npm test
 npm run build
 ```
 
-Tests launch an isolated local MongoDB replica set; the first run may download the free MongoDB server binary. They never use your Atlas URI. Tests cover MongoDB rollback, migration preservation, case-insensitive username uniqueness and race conditions, rejected image uploads, sanitized bill fields, capped discounts, tax bases, rounding conservation across 499 variants, shared quantities, receipt mismatches, over-allocation, a real OCR pass over a synthetic receipt, parser output, persistent data, recovery, invitation claims, private drafts, authorization boundaries, concurrent edits, duplicate actions, and payment confirmation. DOM interaction tests exercise onboarding and live editor recalculation. Desktop browser visual QA was unavailable because computer-use permissions were pending.
+Tests launch an isolated local MongoDB replica set; the first run may download the free MongoDB server binary. They never use your Atlas URI. Tests cover calculation conservation, MongoDB transactions, authorization, legacy debts, partial and combined repayments, concurrent overpayment attempts, idempotent retries, email amounts, draft privacy, receipt choices, missing prices, and interactive editor/payment flows. A 390-pixel-wide browser preview with fictional data checks the mobile layout without using production bills or sending emails.
 
 The optional `read_my_balances` WebMCP tool is feature-detected in supported browsers. It has no write side effects. Its browser integration was not verified in this environment.
 
 ## Current scope
 
 - English printed receipts; extraction is a draft and always needs human review. No promise of automatic perspective correction, blur detection, or accurate handwriting recognition.
-- One original payer per bill; no partial repayments or automatic debt simplification.
+- Multiple original payers and partial repayments are supported. Opposing debts are not automatically canceled.
 - One receipt photo can be scanned at a time; photos are not persisted. No PDF or multi-image receipt import.
 - In-app activity plus verified-email notifications using your configured free Gmail sender; no SMS or background browser push.
 - Sent bills cannot yet be corrected or canceled in the interface. Resolve disputes before accepting or transferring. Creating a second bill does not cancel the first.
-- Vercel deployment is prepared, but your Vercel account and a MongoDB Atlas Free database must be connected before the app can run online. See [the deployment guide](DEPLOYMENT.md).
+- Deployments use the configured Vercel project and MongoDB Atlas database. For a new installation, see [the deployment guide](DEPLOYMENT.md).
 
-The repository itself uses no billable service. Electricity/internet and any charges imposed by your existing software subscription are outside the app's control.
+The payment and draft features need no additional paid service. Optional OpenAI receipt scanning uses configured API credit within the app's spending guard.
 ## Manual bills and multiple original payers
 
 Choose **Manual bill** on the home screen (or **Enter manually** in the editor), add items and prices, then assign items as usual. Discounts, tax and the final amount remain editable.

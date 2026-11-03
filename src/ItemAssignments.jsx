@@ -10,15 +10,18 @@ import {
 import { Avatar } from "./ui.jsx";
 
 export default function ItemAssignments({
+  autoCollapse = false,
   item,
   participants,
   user,
   onChange,
 }) {
   const [sharing, setSharing] = useState(false);
+  const [expandedDone,setExpandedDone]=useState(false);
   const [selected, setSelected] = useState([]);
   const remaining = item.quantity - assignedQuantity(item);
   const done = Math.abs(remaining) < 0.000001;
+  React.useEffect(()=>{if(done)setExpandedDone(false);},[done]);
   const validSelected = selected.filter((id) =>
     participants.some((p) => p.id === id),
   );
@@ -43,6 +46,7 @@ export default function ItemAssignments({
           aria-label={`Share ${item.name}`}
           aria-expanded={sharing}
           onClick={() => {
+            setExpandedDone(true);
             setSelected(item.allocations.map((a) => a.personId));
             setSharing(!sharing);
           }}
@@ -50,7 +54,7 @@ export default function ItemAssignments({
           <Users size={16} /> Share
         </button>
       </div>
-      {!sharing ? (
+      {autoCollapse&&done&&!expandedDone?<button className="button full" onClick={()=>setExpandedDone(true)}>Edit assignments for {item.name}</button>:!sharing ? (
         <>
           <p className="tap-hint">
             {item.quantity === 1
@@ -188,7 +192,7 @@ export default function ItemAssignments({
           </>
         )}
       </div>
-      <details className="precise-quantities">
+      {(!autoCollapse||!done||expandedDone)&&<details className="precise-quantities">
         <summary>Adjust quantities</summary>
         <div className="allocation-grid">
           {participants.map((p) => (
@@ -219,7 +223,7 @@ export default function ItemAssignments({
         >
           Clear assignments
         </button>
-      </details>
+      </details>}
     </article>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -24,6 +24,8 @@ import { Avatar, Breakdown, MoneyInput, Empty, Modal } from "./ui.jsx";
 import ItemAssignments from "./ItemAssignments.jsx";
 import { PayerPicker, TransferSummary, receiversReady } from "./Payers.jsx";
 import { assignedQuantity, equalAllocations } from "../shared/allocations.js";
+import { useDraftAutosave } from './drafts.js';
+import ReceiptQuestions from './ReceiptQuestions.jsx';
 
 export default function BillEditor({
   initial,
@@ -49,6 +51,10 @@ export default function BillEditor({
     [error, setError] = useState(""),
     [progress, setProgress] = useState(null),
     [busy, setBusy] = useState(false);
+  const [onlyUnassigned,setOnlyUnassigned]=useState(false);
+  const undoAssignments=useRef(null);
+  const draft=useMemo(()=>({...bill,entryMode}),[bill,entryMode]);
+  const autosave=useDraftAutosave(user.id,draft);
   const fileRef = useRef(),
     consentResolver = useRef(),
     result = calculate(bill),
@@ -61,28 +67,24 @@ export default function BillEditor({
   };
   useEffect(() => () => consentResolver.current?.(null), []);
   const changeItem = (itemId, patch) =>
-    setBill((current) => ({
+    setBill((current) => {
+      const old=current.items.find(i=>i.id===itemId),resolved=typeof patch==='function'?patch(old):patch;
+      if(resolved.allocations)undoAssignments.current=Object.fromEntries(current.items.map(i=>[i.id,structuredClone(i.allocations)]));
+      if(Object.hasOwn(resolved,'unitPriceCents')||Object.hasOwn(resolved,'lineTotalCents')&&resolved.lineTotalCents!=null)resolved.priceMissing=false;
+      return ({
       ...current,
       items: current.items.map((item) =>
         item.id === itemId
-          ? { ...item, ...(typeof patch === "function" ? patch(item) : patch) }
+          ? { ...item, ...resolved }
           : item,
       ),
-    }));
+    });});
   useEffect(
     () => () => {
       if (image) URL.revokeObjectURL(image);
     },
     [image],
   );
-  useEffect(() => {
-    const before = (e) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", before);
-    return () => window.removeEventListener("beforeunload", before);
-  }, []);
   const applyParsed = (parsed) => {
     const { charges } = parsed;
     setWarnings(parsed.warnings);
@@ -91,6 +93,7 @@ export default function BillEditor({
       title: current.title || parsed.title,
       items: parsed.items,
       receiptTotalCents: parsed.receiptTotalCents,
+      receiptReview:{options:parsed.paymentOptions||[],selectedOption:null,needsTotal:parsed.receiptTotalCents==null},
       discount: {
         ...current.discount,
         type:
@@ -222,6 +225,7 @@ export default function BillEditor({
           method: "POST",
           body: { version: saved.version },
         });
+      autosave.clear();
       await onSaved(saved);
     } catch (e) {
       setError(e.message);
@@ -264,7 +268,7 @@ export default function BillEditor({
         className="text-button back-button"
         onClick={() =>
           window.confirm(
-            "Leave this editor? Save your draft first to keep recent changes.",
+            "Leave this editor? Your draft is kept on this device when autosave succeeds.",
           ) && onClose()
         }
       >
@@ -287,6 +291,7 @@ export default function BillEditor({
           <Save size={17} /> Save draft
         </button>
       </div>
+      <p className="draft-save-status" role="status">{autosave.message}. Photos are not saved.</p>
       <div className="editor-steps">
         <button
           className={step === "review" ? "active" : ""}
@@ -467,6 +472,7 @@ export default function BillEditor({
                   </label>
                 </div>
               </section>
+              <ReceiptQuestions bill={bill} onChange={change} onItemChange={changeItem}/>
               <section className="card">
                 <div className="section-heading">
                   <h2>
@@ -901,6 +907,7 @@ export default function BillEditor({
                         )
                       )
                         return;
+                      undoAssignments.current=Object.fromEntries(bill.items.map(i=>[i.id,structuredClone(i.allocations)]));
                       change({
                         items: bill.items.map((item) => {
                           return {
@@ -923,7 +930,9 @@ export default function BillEditor({
                     text="Return to the review step to add food and drinks."
                   />
                 )}
-                <div className="assignment-progress" role="status">
+                <div className="assignment-tools"><label className="checkbox-label"><input type="checkbox" checked={onlyUnassigned} onChange={e=>setOnlyUnassigned(e.target.checked)}/> Only show unassigned items</label><button className="button" disabled={!undoAssignments.current} onClick={()=>{const previous=undoAssignments.current;undoAssignments.current=null;change({items:bill.items.map(i=>({...i,allocations:(previous[i.id]||i.allocations).filter(a=>bill.participants.includes(a.personId))}))});}}>Undo assignment</button></div>
+                <div className="assignment-progress sticky-assignment-progress" role="status">
+                  <strong>{Number(result.unassignedUnits.toFixed(2))} units left to assign</strong>
                   <span>
                     {
                       bill.items.filter(
@@ -946,8 +955,9 @@ export default function BillEditor({
                     }
                   />
                 </div>
-                {bill.items.map((item) => (
+                {bill.items.filter(item=>!onlyUnassigned||Math.abs(item.quantity-assignedQuantity(item))>0.000001).map((item) => (
                   <ItemAssignments
+                    autoCollapse
                     key={item.id}
                     item={item}
                     participants={participants}

@@ -57,7 +57,6 @@ test("receipt schema rejects malformed data and preserves caps and printed misma
     { quantity: -1 },
     { quantity: "6" },
     { unitPriceCents: 1.5 },
-    { unitPriceCents: null, lineTotalCents: null },
     { name: "" },
     { allocations: [{ personId: "hacker", quantity: 6 }] },
   ]) {

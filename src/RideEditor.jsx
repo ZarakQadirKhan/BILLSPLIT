@@ -4,14 +4,15 @@ import { calculate, normalizeBill, validateBill, money } from '../shared/calcula
 import { request } from './api.js';
 import { Avatar, MoneyInput } from './ui.jsx';
 import { PayerPicker, TransferSummary, receiversReady } from './Payers.jsx';
+import { useDraftAutosave } from './drafts.js';
 
 export default function RideEditor({ initial, people, user, onAddFriend, onProfile, onClose, onSaved }) {
   const [bill, setBill] = useState(() => normalizeBill(structuredClone(initial)));
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const change = patch => setBill(current => normalizeBill({ ...current, ...patch }));
   const result = calculate(bill);
+  const autosave=useDraftAutosave(user.id,bill);
   const passengers = bill.participants.map(personId => people.find(p => p.id === personId)).filter(Boolean);
-  useEffect(() => { const before = e => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', before); return () => window.removeEventListener('beforeunload', before); }, []);
   const toggle = personId => {
     if (result.payments.some(p => p.personId === personId)) return;
     change({ participants: bill.participants.includes(personId) ? bill.participants.filter(p => p !== personId) : [...bill.participants, personId] });
@@ -23,12 +24,13 @@ export default function RideEditor({ initial, people, user, onAddFriend, onProfi
       let saved = await request(bill.id ? `/bills/${bill.id}` : '/bills', { method: bill.id ? 'PUT' : 'POST', body: { bill: valid, version: bill.version } });
       setBill(saved);
       if (publish) saved = await request(`/bills/${saved.id}/publish`, { method: 'POST', body: { version: saved.version } });
-      await onSaved(saved);
+      autosave.clear(); await onSaved(saved);
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
   return <>
-    <button className="text-button back-button" onClick={() => window.confirm('Leave this ride? Save your draft first to keep recent changes.') && onClose()}><ArrowLeft size={16}/> Back to your space</button>
+    <button className="text-button back-button" onClick={() => window.confirm('Leave this ride? Your draft is kept on this device when autosave succeeds.') && onClose()}><ArrowLeft size={16}/> Back to your space</button>
     <div className="page-heading"><div><div className="eyebrow">ONE RIDE. AN EQUAL SHARE.</div><h1>Split your inDrive<span>.</span></h1><p>Choose everyone in the car. We’ll divide the fare equally.</p></div><span className="ride-type-badge"><Car size={19}/> inDrive</span></div>
+    <p className="draft-save-status" role="status">{autosave.message}.</p>
     {error && <div className="notice error" role="alert"><AlertCircle size={18}/>{error}</div>}
     <div className="editor-layout"><div className="editor-main">
       <section className="card"><h2>The ride</h2><div className="form-grid"><label>Ride name<input value={bill.title} onChange={e => change({ title: e.target.value })} maxLength={120} placeholder="e.g. inDrive · dinner to home"/></label><label>Date<input type="date" value={bill.date} onChange={e => change({ date: e.target.value })}/></label><label>Total fare paid<MoneyInput aria-label="Total ride fare" value={bill.fareCents} onChange={fareCents => change({ fareCents })}/></label></div><p className="muted">Enter the complete amount paid, including any tolls or tip.</p></section>

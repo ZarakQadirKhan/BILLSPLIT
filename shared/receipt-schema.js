@@ -9,6 +9,10 @@ const object = (properties) => ({
 const text = (maxLength) => ({ type: "string", maxLength });
 const amount = { type: ["integer", "null"], minimum: 0, maximum: 10000000000 };
 const rate = { type: ["number", "null"], minimum: 0, maximum: 100 };
+const paymentOption = object({
+  label: {...text(80),minLength:1}, taxCents:amount,taxRate:rate,
+  taxBasis:{type:["string","null"],enum:["before","after",null]}, receiptTotalCents:amount,
+});
 export const receiptSchema = object({
   title: text(120),
   items: {
@@ -37,6 +41,7 @@ export const receiptSchema = object({
     tipCents: amount,
   }),
   receiptTotalCents: amount,
+  paymentOptions:{type:"array",maxItems:6,items:paymentOption},
   warnings: { type: "array", maxItems: 30, items: text(300) },
 });
 
@@ -84,13 +89,14 @@ function check(value, schema, path = "receipt") {
 }
 
 export function normalizeReceipt(value) {
+  // Older deployed clients/providers have no paymentOptions field.
+  value={...value,paymentOptions:value.paymentOptions??[]};
   check(value, receiptSchema);
   const warnings = [...value.warnings];
   const items = value.items.map((item) => {
-    if (item.unitPriceCents == null && item.lineTotalCents == null)
-      throw Error("Unreadable item price");
+    const priceMissing=item.unitPriceCents == null && item.lineTotalCents == null;
     const unitPriceCents =
-      item.unitPriceCents ?? Math.round(item.lineTotalCents / item.quantity);
+      priceMissing ? 0 : item.unitPriceCents ?? Math.round(item.lineTotalCents / item.quantity);
     check(unitPriceCents, amount);
     if (
       item.lineTotalCents != null &&
@@ -99,7 +105,7 @@ export function normalizeReceipt(value) {
       warnings.push(
         `Check ${item.name}: printed line total differs from quantity × price.`,
       );
-    return { ...item, id: id(), unitPriceCents, allocations: [] };
+    return { ...item, id: id(), unitPriceCents, priceMissing, allocations: [] };
   });
   if (value.receiptTotalCents == null)
     warnings.push(

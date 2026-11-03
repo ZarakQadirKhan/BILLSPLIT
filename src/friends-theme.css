@@ -1,4 +1,47 @@
 /* A sunny, high-contrast palette. Payment states always have text, not just color. */
+.draft-save-status { color:var(--muted); font-size:.85rem; line-height:1.5; }
+.resume-drafts { background:#fff5cf; margin-bottom:22px; }
+.draft-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }
+.draft-row .button { text-align:left; overflow-wrap:anywhere; }
+.pending-summary { display:flex; justify-content:space-between; align-items:center; gap:16px; width:100%; border:1px solid #e5c87b; border-radius:16px; background:#fff4ce; padding:18px; color:#5c4610; text-align:left; line-height:1.5; }
+.pending-summary strong { white-space:nowrap; }
+.friend-balance { padding:18px 0; }
+.friend-balance .share-preview { margin:0 0 12px; }
+.friend-balance details { padding:8px 0 14px; }
+.friend-balance summary,.balance-entry summary { min-height:44px; cursor:pointer; line-height:1.5; padding:10px 0; }
+.friend-balance .balance-row { justify-content:space-between; text-align:left; }
+.friend-balance .balance-row>span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.friend-balance small { line-height:1.6; }
+.payment-selection { border:1px solid var(--border); padding:12px; border-radius:12px; margin:0 0 18px; min-width:0; }
+.payment-selection legend { font-weight:650; font-size:.9rem; }
+.payment-selection label.checkbox-label { display:flex; flex-direction:row; min-height:48px; padding:10px 0; align-items:center; gap:12px; line-height:1.5; }
+.payment-selection input[type=checkbox],.assignment-tools input[type=checkbox] { flex-shrink:0; width:22px; height:22px; }
+.payment-allocation-list p { display:flex; gap:12px; justify-content:space-between; font-size:.9rem; }
+.payment-allocation-list span { overflow-wrap:anywhere; }
+.payment-allocation-list strong { white-space:nowrap; }
+.assignment-tools { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin:16px 0; }
+.assignment-tools .checkbox-label { min-height:44px; gap:10px; }
+.sticky-assignment-progress { position:sticky; top:12px; z-index:4; padding:14px; border:1px solid #c7c0fa; border-radius:14px; background:#f3f0ff; box-shadow:0 3px 12px #28214512; flex-wrap:wrap; }
+.receipt-questions { border-color:#d1c5f5; background:#f8f5ff; }
+.receipt-questions fieldset { padding:0; margin:20px 0 0; border:0; min-width:0; }
+.receipt-questions legend { font-weight:700; margin-bottom:14px; }
+.receipt-option-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+.receipt-option { display:flex; flex-direction:column; gap:7px; border:2px solid var(--border); border-radius:14px; padding:16px; text-align:left; background:white; color:inherit; min-height:60px; overflow-wrap:anywhere; }
+.receipt-option.selected { border-color:var(--green); background:#eaeaff; }
+.receipt-option-list>.button { grid-column:1/-1; }
+.receipt-option span,.receipt-option small { font-size:.85rem; line-height:1.5; }
+.missing-price-question { margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }
+@media(max-width:720px) {
+  .sticky-assignment-progress { top:60px; }
+  .payment-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); width:100%; }
+  .payment-tabs button { min-height:44px; padding:8px 4px; white-space:normal; }
+  .friend-balance>.button { width:100%; min-height:48px; }
+  .pending-summary { align-items:flex-start; flex-direction:column; gap:6px; }
+  .draft-row { align-items:stretch; }
+  .draft-row>.button { flex:1; min-width:0; }
+  .receipt-option-list { grid-template-columns:1fr; }
+  .assignment-tools .button { min-height:44px; }
+}
 .scan-mode { margin-bottom: 10px; }
 .scan-mode + .footnote { margin-bottom: 18px; }
 :root {

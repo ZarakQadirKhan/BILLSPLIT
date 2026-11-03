@@ -49,6 +49,8 @@ import BillEditor from "./BillEditor.jsx";
 import BillDetails from "./BillDetails.jsx";
 import RideEditor from "./RideEditor.jsx";
 import HomeOverview from "./HomeOverview.jsx";
+import { payableAmount, remainingAmount } from "../shared/payments.js";
+import { readDrafts, removeDraft } from './drafts.js';
 
 export default function App() {
   const [state, setState] = useState(null),
@@ -116,6 +118,13 @@ export default function App() {
     user = state?.user,
     bills = state?.bills || [],
     debts = state?.debts || [];
+  const [localDrafts,setLocalDrafts]=useState([]);
+  useEffect(()=>{
+    if(!user)return;
+    const update=()=>setLocalDrafts(readDrafts(user.id));update();
+    window.addEventListener('tab-drafts-changed',update);window.addEventListener('storage',update);
+    return()=>{window.removeEventListener('tab-drafts-changed',update);window.removeEventListener('storage',update);};
+  },[user?.id]);
   useEffect(() => {
     if (!user) return;
     const openLink = () => {
@@ -137,10 +146,10 @@ export default function App() {
   const outstanding = debts.filter((d) => d.status !== "confirmed");
   const owe = outstanding
     .filter((d) => d.debtor_id === user?.id)
-    .reduce((sum, d) => sum + d.amount, 0);
+    .reduce((sum, d) => sum + payableAmount(d), 0);
   const owed = outstanding
     .filter((d) => d.creditor_id === user?.id)
-    .reduce((sum, d) => sum + d.amount, 0);
+    .reduce((sum, d) => sum + payableAmount(d), 0);
   const unread = state?.events.filter((e) => !e.is_read).length || 0;
   const startBill = () => setModal({ type: "billType" });
   const startSelectedBill = (kind) => {
@@ -153,7 +162,7 @@ export default function App() {
     if (
       editor &&
       !window.confirm(
-        "Leave this editor? Save your draft first to keep recent changes.",
+        "Leave this editor? Your draft is kept on this device when autosave succeeds.",
       )
     )
       return;
@@ -171,7 +180,7 @@ export default function App() {
         {
           name: "read_my_balances",
           description:
-            "Read the current user’s outstanding bill balances in integer paisa, including payments awaiting confirmation.",
+            "Read the current user’s balances still to pay in integer paisa, excluding payments awaiting confirmation.",
           inputSchema: {
             type: "object",
             properties: {},
@@ -244,15 +253,15 @@ export default function App() {
     });
   };
   const action = async (debt, type, fields = {}) => {
-    await request(`/debts/${debt.id}/action`, {
+    await request(type==='paid'?'/repayments':debt.repaymentId?`/repayments/${encodeURIComponent(debt.repaymentId)}/action`:`/debts/${debt.id}/action`, {
       method: "POST",
-      body: { action: type, ...fields },
+      body: type==='paid'?{debtIds:fields.debtIds||[debt.id],amountCents:fields.amountCents??payableAmount(debt),requestId:fields.requestId||id(),reference:fields.reference}:{ action: type, ...fields },
     });
     await refresh();
     setModal(null);
     notify(
       type === "confirm"
-        ? "Payment confirmed. All settled."
+        ? "Payment confirmed. Balances updated."
         : "Payment request updated",
     );
   };
@@ -391,6 +400,7 @@ export default function App() {
               </button>
             </div>
           )}
+          {user&&!editor&&!detail&&localDrafts.length>0&&<section className="card resume-drafts"><h2>Pick up where you left off</h2><p className="muted">Unfinished bills saved on this device. Photos aren’t saved.</p>{localDrafts.map(d=><div className="draft-row" key={d.id}><button className="button" onClick={()=>{const remote=bills.find(b=>b.id===d.bill.id);if(remote?.status==='published'){removeDraft(user.id,d.id);setDetailId(remote.id);return;}setEditor(d.bill);setDetailId(null);}}>Continue {d.bill.title||'untitled bill'}</button><button className="text-button" onClick={()=>{if(window.confirm('Discard this device’s unfinished draft? This cannot be undone.')){removeDraft(user.id,d.id);notify('Device draft discarded.');}}}>Discard</button></div>)}</section>}
           {loading ? (
             <div className="loading">
               <Loader2 className="spin" /> Opening your tab…
@@ -433,6 +443,8 @@ export default function App() {
             />
           ) : detail ? (
             <BillDetails
+              bills={bills}
+              repayments={state.repayments || []}
               bill={detail}
               debts={debts.filter((d) => d.bill_id === detail.id)}
               person={person}
@@ -514,7 +526,7 @@ export default function App() {
                   {view === "friends" ? "Add a friend" : "New split"}
                 </button>}
               </div>
-              {view === "overview" && <HomeOverview debts={debts} user={user} person={person} bills={bills} onOpen={setDetailId} onAction={(debt, action) => setModal({ type: 'payment', debt, action })} onCreate={startSelectedBill} onBills={() => navigate('bills')}>
+              {view === "overview" && <HomeOverview debts={debts} repayments={state.repayments || []} user={user} person={person} bills={bills} onOpen={setDetailId} onAction={(debt, action) => setModal({ type: 'payment', debt, action })} onCreate={startSelectedBill} onBills={() => navigate('bills')}>
                 <BillList bills={bills.slice(0, 4)} debts={debts} person={person} onOpen={setDetailId} onCreate={startBill}/>
               </HomeOverview>}
               {view === "bills" && (
@@ -580,13 +592,13 @@ export default function App() {
                             (d) =>
                               d.creditor_id === p.id && d.debtor_id === user.id,
                           )
-                          .reduce((s, d) => s + d.amount, 0),
+                          .reduce((s, d) => s + remainingAmount(d), 0),
                         from = outstanding
                           .filter(
                             (d) =>
                               d.debtor_id === p.id && d.creditor_id === user.id,
                           )
-                          .reduce((s, d) => s + d.amount, 0);
+                          .reduce((s, d) => s + remainingAmount(d), 0);
                       return (
                         <section className="card friend-card" key={p.id}>
                           <div className="friend-top">
@@ -825,6 +837,8 @@ export default function App() {
       )}
       {modal?.type === "payment" && (
         <PaymentModal
+          bills={bills}
+          key={`${modal.debt.id}:${modal.action}`}
           modal={modal}
           person={person}
           onCopy={copy}

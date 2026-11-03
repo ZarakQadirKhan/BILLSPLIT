@@ -31,7 +31,7 @@ try {
     console.info('VALIDATED RESULT\n'+JSON.stringify({
       items:receipt.items.map(({name,quantity,unitPriceCents,lineTotalCents})=>({name,quantity,unitPrice:unitPriceCents/100,lineTotal:lineTotalCents==null?null:lineTotalCents/100})),
       subtotal:receipt.items.reduce((sum,item)=>sum+(item.lineTotalCents??Math.round(item.quantity*item.unitPriceCents)),0)/100,
-      charges:receipt.charges,receiptTotalCents:receipt.receiptTotalCents,warnings:receipt.warnings,
+      charges:receipt.charges,receiptTotalCents:receipt.receiptTotalCents,paymentOptions:receipt.paymentOptions,warnings:receipt.warnings,
     },null,2));
     if(args.includes('--check-sample')) {
       // Ground truth for the owner-supplied nine-row photo. Never sent to models.
@@ -46,7 +46,9 @@ try {
         assert.equal(receipt.receiptTotalCents,null);
         assert.match(receipt.warnings.join(' '),/card/i);
         assert.match(receipt.warnings.join(' '),/cash/i);
-        console.info('SAMPLE CHECK: PASS — all nine quantities and line totals, subtotal, and unresolved payment method match.');
+        assert.equal(receipt.paymentOptions.find(o=>/card/i.test(o.label))?.taxCents,80575);
+        assert.equal(receipt.paymentOptions.find(o=>/cash/i.test(o.label))?.taxCents,257840);
+        console.info('SAMPLE CHECK: PASS — all nine quantities and line totals, subtotal, and selectable card/cash tax alternatives match.');
       } catch {
         console.error('SAMPLE CHECK: FAIL — compare the displayed extraction with the original receipt.');
         process.exitCode=1;

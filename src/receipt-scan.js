@@ -57,7 +57,7 @@ export async function extractReceipt(
         const receipt = {
           ...result.receipt,
           items: result.receipt.items.map(
-            ({ id, allocations, ...item }) => item,
+            ({ id, allocations, priceMissing, ...item }) => priceMissing ? {...item,unitPriceCents:null,lineTotalCents:null} : item,
           ),
         };
         return {

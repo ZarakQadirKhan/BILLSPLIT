@@ -28,17 +28,20 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     fireEvent.click(screen.getByRole('button',{name:'Add one Dinner plates to Sara'}));
     assert.ok(screen.getByText('All 2 assigned'));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    fireEvent.click(screen.getByRole('button',{name:'Edit assignments for Dinner plates'}));
     fireEvent.change(screen.getByLabelText('Dinner plates quantity for Sara'),{target:{value:'2'}});
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
     fireEvent.click(screen.getByRole('button',{name:'Share Dinner plates'}));
     fireEvent.click(screen.getByRole('button',{name:'Share equally'}));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    fireEvent.click(screen.getByRole('button',{name:'Edit assignments for Dinner plates'}));
     fireEvent.click(screen.getByRole('button',{name:'Remove one Dinner plates from Sara'}));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
     fireEvent.click(screen.getByRole('button',{name:'Add one Dinner plates to Sara'}));
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
     dom.window.confirm = () => true;
     fireEvent.click(screen.getByRole('button',{name:'Split all items equally'}));
+    fireEvent.click(screen.getByRole('button',{name:'Edit assignments for Dinner plates'}));
     assert.equal(screen.getByLabelText('Dinner plates quantity for Sara').value,'1');
     fireEvent.change(screen.getByLabelText('Final charged amount'),{target:{value:'20050'}});
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
@@ -79,7 +82,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.ok(screen.getByRole('heading',{name:'Pay Sara'}));
     assert.equal(screen.getAllByRole('button',{name:'I’ve paid'}).length,1);
     fireEvent.click(screen.getByRole('button',{name:'I’ve paid'})); assert.equal(actionDebt,'first');
-    assert.ok(screen.getByText(/Pending approval from Sara. Your outstanding/));
+    assert.ok(screen.getByText(/Pending approval from Sara/));
     cleanup();
 
     // Exercise the full file -> Gemini -> editable fields flow without any real API.
@@ -164,6 +167,62 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Yes, I received the money'})));
     assert.equal(submitted,true);
     cleanup();
+
+    // Group bills by friend while excluding pending amounts from money to pay.
+    const partiallyPaid={id:'partial',bill_id:'meal1',debtor_id:'ali',creditor_id:'sara',amount:120000,paid_amount:20000,pending_amount:50000,status:'marked_paid'};
+    const anotherDebt={id:'another',bill_id:'meal2',debtor_id:'ali',creditor_id:'sara',amount:30000,status:'assigned'};
+    const report={id:'claim',debtor_id:'ali',creditor_id:'sara',amount:50000,status:'pending',allocations:[{debtId:'partial',billId:'meal1',amount:50000}]};
+    const paymentBills=[{id:'meal1',title:'Dinner'},{id:'meal2',title:'Ride home'}];
+    let grouped;
+    render(React.createElement(HomeOverview,{debts:[partiallyPaid,anotherDebt],repayments:[report],user,person:pid=>pid==='ali'?user:sara,bills:paymentBills,onOpen(){},onAction:(d)=>grouped=d,onCreate(){},onBills(){}}));
+    assert.match(screen.getByRole('button',{name:/You owe.*800.00/}).textContent,/excludes pending/);
+    assert.match(screen.getByRole('button',{name:/Awaiting confirmation — don’t pay again/}).textContent,/500.00/);
+    assert.equal(screen.getAllByRole('button',{name:'I’ve paid'}).length,1,'friend gets one button across bills');
+    fireEvent.click(screen.getByRole('button',{name:'I’ve paid'}));assert.equal(grouped.debts.length,2);cleanup();
+    let paymentBody;
+    render(React.createElement(PaymentModal,{modal:{debt:grouped,action:'paid'},person:pid=>pid==='ali'?user:sara,onClose(){},onSubmit:async body=>{paymentBody=body;}}));
+    assert.equal(screen.getByLabelText('Amount you paid').value,'800');
+    fireEvent.click(screen.getByRole('checkbox',{name:/Ride home/}));assert.equal(screen.getByLabelText('Amount you paid').value,'500');
+    fireEvent.change(screen.getByLabelText('Amount you paid'),{target:{value:'100'}});
+    await act(async()=>fireEvent.click(screen.getByRole('button',{name:'I’ve paid — notify Sara'})));
+    assert.equal(paymentBody.amountCents,10000);assert.deepEqual(paymentBody.debtIds,['partial']);assert.ok(paymentBody.requestId);cleanup();
+
+    // Explicit receipt questions, including a price that must not vanish mid-entry.
+    const choices={...bill,entryMode:'manual',discount:newBill('ali').discount,receiptTotalCents:null,receiptReview:{needsTotal:true,selectedOption:null,options:[{label:'Card',taxCents:150000,taxRate:5,taxBasis:null,receiptTotalCents:3150000},{label:'Cash',taxCents:480000,taxRate:16,taxBasis:null,receiptTotalCents:3480000}]}};
+    render(React.createElement(BillEditor,{initial:choices,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+    fireEvent.click(screen.getByRole('button',{name:/Card.*5% tax/}));assert.equal(screen.getByLabelText('Final charged amount').value,'31500');
+    fireEvent.click(screen.getByRole('button',{name:/Cash.*16% tax/}));assert.equal(screen.getByLabelText('Final charged amount').value,'34800');
+    cleanup();
+    const unknown={...choices,receiptReview:null,items:[{...choices.items[0],name:'Pizza',unitPriceCents:0,lineTotalCents:null,priceMissing:true,allocations:[]}]};
+    render(React.createElement(BillEditor,{initial:unknown,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+    fireEvent.change(screen.getByLabelText('Missing price for Pizza'),{target:{value:'500'}});assert.ok(screen.getByLabelText('Missing price for Pizza'));
+    fireEvent.click(screen.getByRole('button',{name:'Use this price'}));assert.equal(screen.getByLabelText('Item 1 unit price').value,'500');assert.equal(screen.queryByLabelText('Missing price for Pizza'),null);
+    // Completing an item collapses it. Undo restores assignments, not later prices.
+    fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
+    fireEvent.click(screen.getByLabelText('Only show unassigned items'));
+    fireEvent.click(screen.getByRole('button',{name:'Add one Pizza to Ali'}));
+    fireEvent.click(screen.getByRole('button',{name:'Add one Pizza to Sara'}));
+    assert.equal(screen.queryByRole('button',{name:'Add one Pizza to Ali'}),null);
+    fireEvent.click(screen.getByRole('button',{name:'1 Review the bill'}));
+    fireEvent.change(screen.getByLabelText('Item 1 unit price'),{target:{value:'600'}});
+    fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
+    fireEvent.click(screen.getByRole('button',{name:'Undo assignment'}));
+    assert.ok(screen.getByRole('button',{name:'Add one Pizza to Sara'}));
+    fireEvent.click(screen.getByRole('button',{name:'1 Review the bill'}));
+    assert.equal(screen.getByLabelText('Item 1 unit price').value,'600','Undo must preserve price edits');
+    await act(async()=>{window.dispatchEvent(new window.Event('pagehide'));});
+    const drafts=await vite.ssrLoadModule('/src/drafts.js');
+    assert.ok(drafts.readDrafts(user.id).some(d=>d.bill.items[0]?.unitPriceCents===60000));
+    cleanup();
+
+    // A saved/published draft must not reappear when its editor unmounts.
+    function DraftHarness(){const b=React.useMemo(()=>({...newBill('hook-user'),title:'Draft hook'}),[]);const auto=drafts.useDraftAutosave('hook-user',b);return React.createElement('button',{onClick:auto.clear},auto.message);}
+    render(React.createElement(DraftHarness));
+    await act(async()=>{await new Promise(r=>setTimeout(r,350));});
+    assert.equal(drafts.readDrafts('hook-user').length,1);
+    fireEvent.click(screen.getByRole('button',{name:'Draft saved on this device'}));cleanup();
+    assert.equal(drafts.readDrafts('hook-user').length,0);
+    localStorage.clear();
 
     // Verify the onboarding and dashboard use the real profile response.
     const { default:App, BalanceList } = await vite.ssrLoadModule('/src/App.jsx');

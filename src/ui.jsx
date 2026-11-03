@@ -10,6 +10,8 @@ import {
   ArrowRight,
 } from "lucide-react";
 import EmailSettings from "./EmailSettings.jsx";
+import { payableAmount, pendingAmount, remainingAmount } from '../shared/payments.js';
+import { id } from '../shared/calculations.js';
 import { normalizeUsername, normalizeEmail } from "../shared/identity.js";
 import { money, toCents } from "../shared/calculations.js";
 export const statuses = {
@@ -420,16 +422,26 @@ export function Profile({ user, emailDelivery, onClose, onSave, onRecovery, onUp
     </Modal>
   );
 }
-export function PaymentModal({ modal, person, onClose, onSubmit, onCopy }) {
+export function PaymentModal({ modal, person, bills=[], onClose, onSubmit, onCopy }) {
   const [reference, setReference] = useState(''), [note, setNote] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const paid = modal.action === 'paid', confirm = modal.action === 'confirm';
+  const candidates=modal.debt.debts||[modal.debt];
+  const [selected,setSelected]=useState(()=>candidates.map(d=>d.id));
+  const [requestId]=useState(id);
+  const maximum=candidates.filter(d=>selected.includes(d.id)).reduce((sum,d)=>sum+payableAmount(d),0);
+  const [amountCents,setAmount]=useState(()=>paid?maximum:modal.debt.repaymentId?modal.debt.amount:modal.action==='dispute'?remainingAmount(modal.debt):pendingAmount(modal.debt));
   const other = person(confirm ? modal.debt.debtor_id : modal.debt.creditor_id);
   return <Modal title={paid ? 'Pay ' + other.name : confirm ? 'Confirm payment received' : modal.action === 'dispute' ? 'Question this share' : 'Payment not received'} onClose={() => !busy && onClose()}>
-    <div className="payment-amount">{money(modal.debt.amount)}</div>
-    {paid && <div className="payment-destination"><p className="muted">1. Transfer outside this app using these details.</p><pre>{other.paymentDetails || 'Ask ' + other.name + ' for their payment details.'}</pre>{other.paymentDetails && onCopy && <button className="button" onClick={() => onCopy(other.paymentDetails)}><Copy size={16}/> Copy payment details</button>}<p className="muted">2. Once paid, tap below. {other.name} will confirm receipt.</p></div>}
+    {paid&&<small className="muted">Selected balance still to pay</small>}
+    <div className="payment-amount">{money(paid?maximum:amountCents)}</div>
+    {paid&&candidates.length>1&&<fieldset className="payment-selection"><legend>Which bills does this transfer cover?</legend>{candidates.map(d=><label className="checkbox-label" key={d.id}><input type="checkbox" checked={selected.includes(d.id)} onChange={()=>{const next=selected.includes(d.id)?selected.filter(x=>x!==d.id):[...selected,d.id];setSelected(next);setAmount(candidates.filter(x=>next.includes(x.id)).reduce((sum,x)=>sum+payableAmount(x),0));}}/>{d.billTitle||'Shared bill'} · {money(payableAmount(d))}</label>)}<small>Partial amounts cover selected bills in the order listed.</small></fieldset>}
     {confirm && <><p className="muted">{other.name} says they paid you. Check your bank, wallet or cash before confirming. Both of you will then see this as paid.</p>{modal.debt.reference && <p className="muted">Their reference: {modal.debt.reference}</p>}</>}
     {!paid && !confirm && <p className="muted">Explain what needs checking. The other person will see your note.</p>}
-    <form onSubmit={async e => { e.preventDefault(); if (busy) return; setBusy(true); setError(''); try { await onSubmit({ reference, note }); } catch(e) { setError(e.message); } finally { setBusy(false); } }}>
+    <form onSubmit={async e => { e.preventDefault(); if (busy) return; if(paid&&(!Number.isSafeInteger(amountCents)||amountCents<=0||amountCents>maximum)){setError('Enter an amount greater than zero, up to the selected balance.');return;} setBusy(true); setError(''); try { await onSubmit({ reference, note, amountCents, debtIds:candidates.filter(d=>selected.includes(d.id)).map(d=>d.id), requestId }); } catch(e) { setError(e.message); } finally { setBusy(false); } }}>
+      {paid&&<label>How much did you actually pay?<MoneyInput aria-label="Amount you paid" value={amountCents} onChange={setAmount}/><small>You can pay part of the balance. {money(Math.max(0,maximum-amountCents))} will still need payment; {money(amountCents)} will await confirmation.</small></label>}
+      {paid && <div className="payment-destination"><p className="muted">Transfer outside this app using these details.</p><pre>{other.paymentDetails || 'Ask ' + other.name + ' for their payment details.'}</pre>{other.paymentDetails && onCopy && <button type="button" className="button" onClick={() => onCopy(other.paymentDetails)}><Copy size={16}/> Copy payment details</button>}<p className="muted">Once paid, tap below. {other.name} will confirm receipt.</p></div>}
+      {confirm&&modal.debt.allocations?.length>1&&<p className="notice">This confirms one transfer covering {modal.debt.allocations.length} bill shares. Check the full transfer amount before approving.</p>}
+      {!paid&&modal.debt.allocations&&<div className="payment-allocation-list">{modal.debt.allocations.map(a=><p key={a.debtId}><span>{bills.find(b=>b.id===a.billId)?.title||'Shared bill'}</span><strong>{money(a.amount)}</strong></p>)}</div>}
       {paid ? <details className="optional-fields"><summary>Add a transfer reference (optional)</summary><label>Transfer reference<input value={reference} onChange={e => setReference(e.target.value)} maxLength={200} placeholder="Transaction ID or bank reference"/></label></details> : !confirm && <label>Your note<textarea rows={3} value={note} onChange={e => setNote(e.target.value)} maxLength={500} required/></label>}
       {error && <p className="inline-error" role="alert">{error}</p>}
       <button className="button primary full" disabled={busy}>{busy ? 'Saving…' : paid ? 'I’ve paid — notify ' + other.name : confirm ? 'Yes, I received the money' : 'Send note'}</button>

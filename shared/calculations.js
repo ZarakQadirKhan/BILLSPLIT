@@ -1,4 +1,5 @@
 // All stored money is integer paisa. No model or OCR output does arithmetic.
+import { receiptReviewErrors, validateReceiptReview } from './receipt-review.js';
 export const UNASSIGNED = '__unassigned__';
 export const money = cents => new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((Number(cents) || 0) / 100);
 export const toCents = value => Math.round((Number(value) || 0) * 100);
@@ -66,7 +67,7 @@ export function settlement(bill, total, shares) {
 }
 export function calculate(bill) {
   bill = normalizeBill(bill);
-  const errors = [], shares = {}, eligibleShares = {};
+  const errors = receiptReviewErrors(bill), shares = {}, eligibleShares = {};
   const ensure = key => shares[key] ||= { items: 0, discount: 0, tax: 0, fees: 0, total: 0 };
   for (const person of bill.participants || []) ensure(person);
   ensure(UNASSIGNED);
@@ -134,10 +135,12 @@ export function validateBill(bill) {
     for (const p of bill.payments) if (!p || !bill.participants.includes(p.personId) || !cents(p.amountCents)) throw Error('Enter a valid amount for each payer.');
   }
   if (!Array.isArray(bill.items) || bill.items.length > 200) throw Error('A bill can contain up to 200 items.');
+  if(bill.receiptReview!=null) validateReceiptReview(bill.receiptReview);
   const ids = new Set();
   for (const item of bill.items) {
     if (!str(item.id, 100) || ids.has(item.id)) throw Error('Invalid or duplicate item.');
     ids.add(item.id);
+    if(item.priceMissing!=null&&typeof item.priceMissing!=='boolean') throw Error('Invalid missing price flag.');
     if (!str(item.name, 200) || !item.name.trim()) throw Error('Every item needs a name.');
     if (!Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > 10000) throw Error('Item quantities must be greater than zero.');
     if (!cents(item.unitPriceCents) || (item.lineTotalCents != null && !cents(item.lineTotalCents)) || !cents(item.lineTotalCents ?? Math.round(item.quantity * item.unitPriceCents))) throw Error('Enter valid item prices.');
@@ -155,10 +158,11 @@ export function validateBill(bill) {
   // Only persist the reviewed bill fields, never client metadata or image blobs.
   const stored = Object.fromEntries(Object.keys(newBill(bill.paidBy)).map(key => [key, bill[key]]));
   stored.kind = bill.kind || 'food';
+  if(bill.receiptReview) stored.receiptReview=validateReceiptReview(bill.receiptReview);
   if (Array.isArray(bill.payments)) stored.payments = bill.payments.map(({ personId, amountCents }) => ({ personId, amountCents }));
   stored.receiptId = null;
   if (bill.kind === 'ride') stored.fareCents = bill.fareCents;
-  stored.items = bill.items.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, unitPriceCents: item.unitPriceCents, lineTotalCents: item.lineTotalCents ?? null, eligible: item.eligible !== false, allocations: item.allocations.map(({ personId, quantity }) => ({ personId, quantity })) }));
+  stored.items = bill.items.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, unitPriceCents: item.unitPriceCents, lineTotalCents: item.lineTotalCents ?? null, priceMissing:!!item.priceMissing, eligible: item.eligible !== false, allocations: item.allocations.map(({ personId, quantity }) => ({ personId, quantity })) }));
   stored.discount = Object.fromEntries(['type', 'rate', 'amountCents', 'eligibleCapCents', 'maxDiscountCents'].map(key => [key, bill.discount[key]]));
   stored.tax = Object.fromEntries(['type', 'rate', 'amountCents', 'basis'].map(key => [key, bill.tax[key]]));
   return stored;

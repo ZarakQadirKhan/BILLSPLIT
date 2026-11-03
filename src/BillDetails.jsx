@@ -13,10 +13,14 @@ import {
 } from "lucide-react";
 import { calculate, money } from "../shared/calculations.js";
 import { Avatar, Badge, Breakdown, shortDate } from "./ui.jsx";
+import { confirmedAmount, remainingAmount, payableAmount, pendingAmount, repaymentCard } from '../shared/payments.js';
+import { BalanceList } from './HomeOverview.jsx';
 
 export default function BillDetails({
   bill,
+  bills = [bill],
   debts,
+  repayments = [],
   person,
   user,
   onBack,
@@ -29,11 +33,11 @@ export default function BillDetails({
     isPayer = result.payments.some(p => p.personId === user.id),
     myDebts = debts.filter((d) => d.debtor_id === user.id);
   const received = debts
-      .filter((d) => d.status === "confirmed" && d.creditor_id === user.id)
-      .reduce((s, d) => s + d.amount, 0),
+      .filter((d) => d.creditor_id === user.id)
+      .reduce((s, d) => s + confirmedAmount(d), 0),
     outstanding = debts
       .filter((d) => d.status !== "confirmed" && d.creditor_id === user.id)
-      .reduce((s, d) => s + d.amount, 0),
+      .reduce((s, d) => s + remainingAmount(d), 0),
     settled =
       bill.status === "published" &&
       debts.every((d) => d.status === "confirmed");
@@ -97,6 +101,7 @@ export default function BillDetails({
               </div>
             </section>
           )}
+          {repayments.some(p=>p.status==='pending'&&p.allocations.some(a=>a.billId===bill.id))&&<section className="card"><h2>Payments awaiting confirmation</h2><BalanceList debts={repayments.filter(p=>p.status==='pending'&&p.allocations.some(a=>a.billId===bill.id)).map(repaymentCard)} user={user} person={person} bills={bills} filter="all" onOpen={()=>{}} onConfirm={d=>onAction(d,'confirm')} onReject={d=>onAction(d,'reject')}/></section>}
           {myDebts.map(myDebt => { const payer = person(myDebt.creditor_id); return (
             <section className="card my-payment" key={myDebt.id}>
               <div className="section-heading">
@@ -109,12 +114,11 @@ export default function BillDetails({
                   <small>
                     {myDebt.status === "confirmed"
                       ? "You paid"
-                      : myDebt.status === "marked_paid"
-                        ? "Pending approval from"
-                        : "You owe"}{" "}
+                      : "Still to pay"}{" "}
                     {payer.name}
                   </small>
-                  <strong>{money(myDebt.amount)}</strong>
+                  <strong>{money(myDebt.status==='confirmed'?confirmedAmount(myDebt):payableAmount(myDebt))}</strong>
+                  <p className="muted">Original share {money(myDebt.amount)} · Confirmed {money(confirmedAmount(myDebt))} · Awaiting confirmation {money(pendingAmount(myDebt))}</p>
                 </div>
               </div>
               <details className="optional-breakdown"><summary>How your share was calculated</summary><Breakdown result={result.shares[user.id]} compact /></details>
@@ -123,9 +127,7 @@ export default function BillDetails({
                 <p className="muted">Transfer reference: {myDebt.reference}</p>
               )}
               <div className="action-row">
-                {["assigned", "accepted", "disputed"].includes(
-                  myDebt.status,
-                ) && (
+                {payableAmount(myDebt)>0 && (
                   <button
                     className="button primary"
                     onClick={() => onAction(myDebt, "paid")}
@@ -143,8 +145,7 @@ export default function BillDetails({
                 )}
                 {myDebt.status === "marked_paid" && (
                   <p className="muted">
-                    Pending approval from {payer.name}. Your outstanding balance
-                    updates after confirmation.
+                    Pending approval from {payer.name}. Don’t pay the pending amount again. Only confirmed payments reduce the outstanding balance.
                   </p>
                 )}
                 {myDebt.status === "confirmed" && (
@@ -176,8 +177,8 @@ export default function BillDetails({
                         </strong>
                         <small>
                           {(() => {
-                            const incoming = debts.filter(d => d.creditor_id === personId && d.status !== 'confirmed').reduce((sum, d) => sum + d.amount, 0);
-                            const outgoing = personDebts.filter(d => d.status !== 'confirmed').reduce((sum, d) => sum + d.amount, 0);
+                            const incoming = debts.filter(d => d.creditor_id === personId).reduce((sum, d) => sum + remainingAmount(d), 0);
+                            const outgoing = personDebts.reduce((sum, d) => sum + remainingAmount(d), 0);
                             return bill.status === 'draft' ? 'Draft share' : incoming > 0 ? 'Still receives ' + money(incoming) : outgoing > 0 ? 'Still pays ' + money(outgoing) : 'Settled';
                           })()}
                         </small>
@@ -208,13 +209,13 @@ export default function BillDetails({
                       </p>
                     </details>
                     {personDebts.map(debt => (
-                      <div className="debt-footer" key={debt.id}><span>To {person(debt.creditor_id).name}: {money(debt.amount)}</span>
+                      <div className="debt-footer" key={debt.id}><span>To {person(debt.creditor_id).name}: {money(payableAmount(debt))} to pay · {money(pendingAmount(debt))} pending · {money(confirmedAmount(debt))} confirmed</span>
                         <Badge status={debt.status} />
                         {debt.note && (
                           <span className="debt-note">{debt.note}</span>
                         )}
                         {debt.reference && <small>Ref: {debt.reference}</small>}
-                        {debt.creditor_id === user.id && debt.status === "marked_paid" && (
+                        {debt.creditor_id === user.id && debt.status === "marked_paid" && debt.pending_amount==null && (
                           <div className="action-row">
                             <button
                               className="button primary"

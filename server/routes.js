@@ -6,6 +6,8 @@ import { normalizeUsername, normalizeEmail } from '../shared/identity.js';
 import { createEmailService } from './email.js';
 import { createReceiptScanner, validReceiptImage } from './receipt-scan.js';
 import { createReceiptPipeline } from './openai-receipt.js';
+import { createRepaymentService } from './repayments.js';
+import { payableAmount } from '../shared/payments.js';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -36,6 +38,7 @@ export async function createApi(dataDirectory, options = {}) {
     await mail.queueVerification(user, code, codeHash);
   }
   const event = (user_id, bill_id, message) => db.insert('events', { id: randomUUID(), user_id, bill_id, message, is_read: false, created_at: now() });
+  const payments = createRepaymentService(db,mail,event);
   async function issueSession(user_id) {
     const token = secret();
     await db.insert('sessions', { id: hash(token), user_id });
@@ -68,6 +71,8 @@ export async function createApi(dataDirectory, options = {}) {
       }
       await db.updateMany('debts', { debtor_id: placeholder.id }, { $set: { debtor_id: existingId } });
       await db.updateMany('debts', { creditor_id: placeholder.id }, { $set: { creditor_id: existingId } });
+      await db.updateMany('repayments', { debtor_id: placeholder.id }, { $set: { debtor_id: existingId } });
+      await db.updateMany('repayments', { creditor_id: placeholder.id }, { $set: { creditor_id: existingId } });
       await db.updateMany('events', { user_id: placeholder.id }, { $set: { user_id: existingId } });
       for (const row of await db.many('contacts', { person_id: placeholder.id })) await link(row.owner_id, existingId);
       await db.remove('contacts', { $or: [{ owner_id: placeholder.id }, { person_id: placeholder.id }] });
@@ -152,9 +157,10 @@ export async function createApi(dataDirectory, options = {}) {
       for (const row of rows) { visible.add(row.creator_id); for (const p of row.participants) visible.add(p); }
       const people = await db.many('users', { id: { $in: [...visible] } });
       const debts = await db.many('debts', { bill_id: { $in: rows.map(row => row.id) } });
+      const repayments = await db.many('repayments', { $or: [{ debtor_id: userId }, { creditor_id: userId }] }, { sort: { created_at: -1 } });
       const events = await db.many('events', { user_id: userId }, { sort: { created_at: -1 }, limit: 200 });
       const emailQueue = await db.many('email_outbox', { user_id: userId, status: { $in: ['pending', 'sending', 'failed'] } }, { projection: { _id: 0, status: 1, last_error: 1 }, sort: { created_at: -1 } });
-      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), bills: rows.map(billResult), debts: debts.map(debtResult), events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
+      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), bills: rows.map(billResult), debts: debts.map(debtResult), repayments, events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
     });
     res.json(state);
   });
@@ -195,7 +201,8 @@ export async function createApi(dataDirectory, options = {}) {
       await db.update('users', { id: user.id }, { $set: { email_verified: true }, $unset: { email_code_hash: '', email_code_expires: '' } });
       // Catch up on shares assigned before this person joined or verified.
       for (const debt of await db.many('debts', { debtor_id: user.id, status: { $in: ['assigned','accepted','disputed'] } })) await mail.queueDebt('owed', debt, user.id);
-      for (const debt of await db.many('debts', { creditor_id: user.id, status: 'marked_paid' })) await mail.queueDebt('approval', debt, user.id);
+      for (const debt of await db.many('debts', { creditor_id: user.id, status: 'marked_paid', pending_amount: { $exists: false } })) await mail.queueDebt('approval', debt, user.id);
+      for (const payment of await db.many('repayments', { creditor_id: user.id, status: 'pending' })) await mail.queueRepayment('approval', payment, user.id);
       return { user: selfUser(await getUser(user.id)) };
     });
     if (result.error) fail(result.error);
@@ -271,34 +278,40 @@ export async function createApi(dataDirectory, options = {}) {
       return billResult(await db.one('bills', { id: row.id }));
     }); await deliver(); res.json(result);
   });
+  api.post('/repayments', async (req,res) => { const result=await payments.report(req.user,req.body); await deliver(); res.status(201).json(result); });
+  api.post('/repayments/:id/action', async (req,res) => { const result=await payments.decide(req.user,req.params.id,req.body.action,req.body.note); await deliver(); res.json(result); });
   api.post('/debts/:id/action', async (req, res) => {
     const result = await db.transaction(async () => {
       const debt = await db.one('debts', { id: req.params.id });
       if (!debt) fail('Payment request not found.', 404);
-      const { action } = req.body, isDebtor = debt.debtor_id === req.user.id, isCreditor = debt.creditor_id === req.user.id;
+      if(req.body.action==='paid') {
+        if(debt.debtor_id!==req.user.id) fail('You cannot perform that action.',403);
+        const amount=req.body.amountCents??payableAmount(debt);
+        if(amount<=0) fail('The payment status changed. Refresh and try again.',409);
+        await payments.report(req.user,{debtIds:[debt.id],amountCents:amount,requestId:req.body.requestId||randomUUID(),reference:req.body.reference});
+        return debtResult(await db.one('debts',{id:debt.id}));
+      }
+      if(['confirm','reject'].includes(req.body.action)) {
+        if(debt.creditor_id!==req.user.id) fail('You cannot perform that action.',403);
+        if(debt.status!=='marked_paid') fail('The payment status changed. Refresh and try again.',409);
+        await payments.decideDebt(req.user,debt,req.body.action,req.body.note);
+        return debtResult(await db.one('debts',{id:debt.id}));
+      }
+      const { action } = req.body, isDebtor = debt.debtor_id === req.user.id;
       const transitions = {
         accept: { from: ['assigned','disputed'], to: 'accepted', allowed: isDebtor },
         dispute: { from: ['assigned','accepted'], to: 'disputed', allowed: isDebtor },
-        paid: { from: ['assigned','accepted','disputed'], to: 'marked_paid', allowed: isDebtor },
-        confirm: { from: ['marked_paid'], to: 'confirmed', allowed: isCreditor },
-        reject: { from: ['marked_paid'], to: 'accepted', allowed: isCreditor },
       };
       const transition = transitions[action];
       if (!transition?.allowed) fail('You cannot perform that action.', 403);
       if (!transition.from.includes(debt.status)) fail('The payment status changed. Refresh and try again.', 409);
-      const note = clean(req.body.note, 500), reference = clean(req.body.reference, 200);
-      if ((action === 'dispute' || action === 'reject') && !note) fail('Add a short explanation.');
-      const verb = { accept: 'accepted their share', dispute: 'questioned their share', paid: 'marked their transfer as paid', confirm: 'confirmed the payment arrived', reject: 'could not confirm the transfer' }[action];
-      await db.update('debts', { id: debt.id }, { $set: { status: transition.to, reference: action === 'paid' ? reference : debt.reference, note: note || debt.note, updated_at: now(), ...(action === 'paid' ? { marked_paid_at: now() } : {}), ...(action === 'confirm' ? { confirmed_at: now() } : {}) } });
+      const note = clean(req.body.note, 500);
+      if (action === 'dispute' && !note) fail('Add a short explanation.');
+      const verb = { accept: 'accepted their share', dispute: 'questioned their share' }[action];
+      await db.update('debts', { id: debt.id }, { $set: { status: transition.to, note: note || debt.note, updated_at: now() } });
       await event(isDebtor ? debt.creditor_id : debt.debtor_id, debt.bill_id, `${req.user.name} ${verb}.`);
       await event(req.user.id, debt.bill_id, `You ${verb.replace('their', 'your')}.`);
       const updated = await db.one('debts', { id: debt.id });
-      if (action === 'paid') await mail.queueDebt('approval', updated, debt.creditor_id);
-      if (action === 'confirm') {
-        await mail.queueDebt('confirmed', updated, debt.debtor_id);
-        await mail.queueDebt('confirmed', updated, debt.creditor_id);
-      }
-      if (action === 'reject') await mail.queueDebt('rejected', updated, debt.debtor_id);
       return debtResult(updated);
     }); await deliver(); res.json(result);
   });

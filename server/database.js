@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { MongoClient } from 'mongodb';
 
-export const collections = ['users', 'sessions', 'contacts', 'invitations', 'bills', 'debts', 'events', 'rate_limits', 'email_outbox', 'ai_budget', 'ai_usage'];
+export const collections = ['users', 'sessions', 'contacts', 'invitations', 'bills', 'debts', 'repayments', 'events', 'rate_limits', 'email_outbox', 'ai_budget', 'ai_usage'];
 
 export async function openDatabase(_directory, options = {}) {
   const uri = options.uri ?? process.env.MONGODB_URI;
@@ -25,6 +25,9 @@ export async function openDatabase(_directory, options = {}) {
     catch (error) { if (error.code !== 27) throw error; }
     await mongo.collection('debts').createIndex({ creditor_id: 1, status: 1 });
     await mongo.collection('debts').createIndex({ debtor_id: 1, status: 1 });
+    await mongo.collection('repayments').createIndex({ creditor_id: 1, status: 1 });
+    await mongo.collection('repayments').createIndex({ debtor_id: 1, created_at: -1 });
+    await mongo.collection('repayments').createIndex({ 'allocations.debtId': 1, status: 1 });
     await mongo.collection('events').createIndex({ user_id: 1, created_at: -1 });
     await mongo.collection('rate_limits').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
     await mongo.collection('email_outbox').createIndex({ status: 1, retry_at: 1, lease_until: 1 });

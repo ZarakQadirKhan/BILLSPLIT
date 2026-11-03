@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { randomUUID } from 'node:crypto';
 import { money } from '../shared/calculations.js';
+import { remainingAmount } from '../shared/payments.js';
 
 // Never serialize an SMTP error: its message/response can contain private data.
 export function emailDiagnostic(error) {
@@ -30,7 +31,7 @@ export function createEmailService(db, options = {}) {
     if (!recipient?.email_verified || !recipient.email || recipient.email_notifications === false) return;
     const row = await db.one('bills', { id: debt.bill_id });
     const debtor = await db.one('users', { id: debt.debtor_id }), creditor = await db.one('users', { id: debt.creditor_id });
-    const title = row?.data.title || 'Shared bill', amount = money(debt.amount);
+    const title = row?.data.title || 'Shared bill', amount = money(kind==='confirmed'?debt.amount:remainingAmount(debt));
     const content = {
       owed: ['You have a new bill share', `You owe ${creditor.name} (@${creditor.username}) ${amount} for ${title}. Review the bill and transfer details in the app. Pay outside the app, then press “I’ve paid”.`],
       approval: ['Payment reported — please confirm receipt', `${debtor.name} (@${debtor.username}) says they paid you ${amount} for ${title}. Check your bank, wallet or cash receipt first, then open the app and choose “Confirm received” or “Not received”. This payment is pending approval.`],
@@ -38,6 +39,23 @@ export function createEmailService(db, options = {}) {
       rejected: ['Payment not yet confirmed', `${creditor.name} could not confirm your ${amount} payment for ${title}. It is still unpaid. Open the bill to read their note.`],
     }[kind];
     await queue({ kind, user_id: recipientId, to: recipient.email, debt_id: debt.id, bill_id: debt.bill_id, subject: content[0], text: content[1], expected_status: kind === 'owed' ? ['assigned','accepted','disputed'] : kind === 'approval' ? ['marked_paid'] : kind === 'confirmed' ? ['confirmed'] : ['accepted'] });
+  }
+  async function queueRepayment(kind,payment,recipientId) {
+    const recipient=await db.one('users',{id:recipientId});
+    if(!recipient?.email_verified||!recipient.email||recipient.email_notifications===false) return;
+    const debtor=await db.one('users',{id:payment.debtor_id}),creditor=await db.one('users',{id:payment.creditor_id});
+    const lines=[];
+    for(const a of payment.allocations) {
+      const bill=await db.one('bills',{id:a.billId}),debt=await db.one('debts',{id:a.debtId});
+      lines.push(`${bill?.data.title||'Shared bill'}: ${money(a.amount)}; outstanding after confirmed payments: ${money(remainingAmount(debt))}.`);
+    }
+    const amount=money(payment.amount);
+    const content={
+      approval:['Payment reported — please confirm receipt',`${debtor.name} says they paid you ${amount}. Check your bank, wallet or cash before confirming this complete payment report. It is pending approval.`],
+      confirmed:['Payment confirmed',`${creditor.name} confirmed receiving ${amount} from ${debtor.name}. Only this amount is confirmed; any remaining balance is still owed.`],
+      rejected:['Payment not yet confirmed',`${creditor.name} could not confirm the ${amount} payment. That amount is available to pay again. Note: ${payment.note||'Check with the recipient.'}`],
+    }[kind];
+    await queue({kind,user_id:recipientId,to:recipient.email,repayment_id:payment.id,bill_id:payment.allocations[0].billId,subject:content[0],text:`${content[1]}\n\n${lines.join('\n')}`,expected_status:[kind==='approval'?'pending':kind==='confirmed'?'confirmed':'rejected']});
   }
   async function flush({ limit = 50 } = {}) {
     if (!enabled) return;
@@ -50,7 +68,7 @@ export function createEmailService(db, options = {}) {
         const recipient = await db.one('users', { id: message.user_id });
         const valid = recipient?.email === message.to && (message.kind === 'verification'
           ? !recipient.email_verified && recipient.email_code_hash === message.code_hash && new Date(recipient.email_code_expires) > new Date()
-          : recipient.email_verified && recipient.email_notifications !== false && message.expected_status.includes((await db.one('debts', { id: message.debt_id }))?.status));
+          : recipient.email_verified && recipient.email_notifications !== false && message.expected_status.includes((await db.one(message.repayment_id?'repayments':'debts', { id: message.repayment_id||message.debt_id }))?.status));
         if (!valid) { await db.update('email_outbox', { id: message.id }, { $set: { status: 'canceled', delete_after: new Date(Date.now() + 86400000) }, $unset: { text: '' } }); continue; }
         // Conservative cap below Gmail's published personal-account limit. Never buy overages.
         if (!await db.reserveEmailAttempt(100)) {
@@ -77,6 +95,7 @@ export function createEmailService(db, options = {}) {
       catch (error) { report('sender_check_failed', emailDiagnostic(error)); }
     },
     queueDebt,
+    queueRepayment,
     queueVerification: (user, code, codeHash) => queue({ kind: 'verification', user_id: user.id, to: user.email, code_hash: codeHash, subject: 'Verify your email address', text: `Your verification code is ${code}. It expires in 15 minutes. Enter it in Your profile. If you did not request this, ignore this email.`, delete_after: new Date(Date.now() + 86400000) }),
     flush,
   };

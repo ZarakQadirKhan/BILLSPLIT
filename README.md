@@ -116,7 +116,7 @@ The payment and draft features need no additional paid service. Optional OpenAI 
 
 A successful full or partial repayment report shows falling dollar bills and a thank-you message for eight seconds. The payment remains pending until the recipient confirms it. Closing the celebration or hiding the page stops it; reduced-motion preferences disable the falling bills.
 
-Audio is disabled until an authorized song clip is supplied. To connect it, add the clip under `public/audio/` and set `paymentAudio.src` in `src/celebration-audio.js` to its public path. Configure `startSeconds` for the desired section; playback is capped at eight seconds. Audio is prepared during the payment-button gesture for mobile browsers, with mute and manual-play controls when configured. No music subscription or external audio service is used.
+The user-supplied `public/audio/paisa.m4a` clip plays from its beginning for eight seconds. The start and duration are configured in `src/celebration-audio.js`; playback is capped at eight seconds. Audio is prepared during the payment-button gesture for mobile browsers, with mute and manual-play controls. No music subscription or external audio service is used.
 
 ## Manual bills and multiple original payers
 

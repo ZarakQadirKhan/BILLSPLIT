@@ -1,6 +1,5 @@
-// Add the owner-supplied, licensed clip here when it is provided. No remote
-// music service, substitute song, or missing-file request is used meanwhile.
-export const paymentAudio = {src:null,startSeconds:0,durationSeconds:8};
+// User-supplied clip, hosted with the app; no external music service.
+export const paymentAudio = {src:'/audio/paisa.m4a',startSeconds:0,durationSeconds:8};
 
 export function createCelebrationAudio(config=paymentAudio,options={}) {
   let storage;try{storage=options.storage??globalThis.localStorage;}catch{}

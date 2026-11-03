@@ -267,7 +267,8 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
       const celebration=screen.getByRole('region',{name:'Payment celebration'});
       assert.match(celebration.textContent,/Thank you for paying!/);assert.match(celebration.textContent,/500.00 reported to Sara/);assert.match(celebration.textContent,/Waiting for confirmation/);
       assert.equal(liveDebt.status,'marked_paid');assert.equal(reports,2);
-      assert.equal(screen.queryByRole('button',{name:'Play celebration sound'}),null,'no absent song controls');
+      assert.ok(screen.getByRole('button',{name:'Mute sound'}));
+      assert.ok(screen.getByRole('button',{name:'Play celebration sound'}),'manual playback is available when automatic audio is unavailable');
       fireEvent.click(screen.getByRole('button',{name:'Close celebration'}));assert.equal(screen.queryByRole('region',{name:'Payment celebration'}),null);
     }finally{cleanup();globalThis.fetch=originalFetch;localStorage.clear();}
     let paid;

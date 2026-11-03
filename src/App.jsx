@@ -51,8 +51,14 @@ import RideEditor from "./RideEditor.jsx";
 import HomeOverview from "./HomeOverview.jsx";
 import { payableAmount, remainingAmount } from "../shared/payments.js";
 import { readDrafts, removeDraft } from './drafts.js';
+import PaymentCelebration from './PaymentCelebration.jsx';
+import {createCelebrationAudio} from './celebration-audio.js';
 
 export default function App() {
+  const [celebration,setCelebration]=useState(null);
+  const [celebrationAudio]=useState(()=>createCelebrationAudio());
+  const closeCelebration=useCallback(()=>setCelebration(null),[]);
+  useEffect(()=>()=>celebrationAudio.dispose(),[celebrationAudio]);
   const [state, setState] = useState(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
@@ -253,13 +259,16 @@ export default function App() {
     });
   };
   const action = async (debt, type, fields = {}) => {
-    await request(type==='paid'?'/repayments':debt.repaymentId?`/repayments/${encodeURIComponent(debt.repaymentId)}/action`:`/debts/${debt.id}/action`, {
+    if(type==='paid')celebrationAudio.prime();
+    let result;
+    try {result=await request(type==='paid'?'/repayments':debt.repaymentId?`/repayments/${encodeURIComponent(debt.repaymentId)}/action`:`/debts/${debt.id}/action`, {
       method: "POST",
       body: type==='paid'?{debtIds:fields.debtIds||[debt.id],amountCents:fields.amountCents??payableAmount(debt),requestId:fields.requestId||id(),reference:fields.reference}:{ action: type, ...fields },
-    });
-    await refresh();
+    });}catch(error){if(type==='paid')celebrationAudio.stop();throw error;}
     setModal(null);
-    notify(
+    if(type==='paid')setCelebration({id:result.id,amount:result.amount,recipient:person(debt.creditor_id).name});
+    await refresh();
+    if(type!=='paid')notify(
       type === "confirm"
         ? "Payment confirmed. Balances updated."
         : "Payment request updated",
@@ -268,6 +277,7 @@ export default function App() {
   const detail = bills.find((b) => b.id === detailId);
   return (
     <div className="app-shell">
+      {celebration&&<PaymentCelebration key={celebration.id} payment={celebration} audio={celebrationAudio} onClose={closeCelebration}/>}
       <aside className="sidebar">
         <a
           className="brand"

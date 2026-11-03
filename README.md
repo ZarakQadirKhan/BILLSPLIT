@@ -111,6 +111,13 @@ The optional `read_my_balances` WebMCP tool is feature-detected in supported bro
 - Deployments use the configured Vercel project and MongoDB Atlas database. For a new installation, see [the deployment guide](DEPLOYMENT.md).
 
 The payment and draft features need no additional paid service. Optional OpenAI receipt scanning uses configured API credit within the app's spending guard.
+
+## Payment celebration
+
+A successful full or partial repayment report shows falling dollar bills and a thank-you message for eight seconds. The payment remains pending until the recipient confirms it. Closing the celebration or hiding the page stops it; reduced-motion preferences disable the falling bills.
+
+Audio is disabled until an authorized song clip is supplied. To connect it, add the clip under `public/audio/` and set `paymentAudio.src` in `src/celebration-audio.js` to its public path. Configure `startSeconds` for the desired section; playback is capped at eight seconds. Audio is prepared during the payment-button gesture for mobile browsers, with mute and manual-play controls when configured. No music subscription or external audio service is used.
+
 ## Manual bills and multiple original payers
 
 Choose **Manual bill** on the home screen (or **Enter manually** in the editor), add items and prices, then assign items as usual. Discounts, tax and the final amount remain editable.

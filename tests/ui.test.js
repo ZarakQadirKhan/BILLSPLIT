@@ -6,7 +6,7 @@ import { createServer } from 'vite';
 import { newBill, newRideBill } from '../shared/calculations.js';
 
 test('interactive editor recalculates capped discounts, allocations and receipt reconciliation', async () => {
-  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url:'http://localhost:5173/' });
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url:'http://localhost:5173/',pretendToBeVisual:true });
   Object.assign(globalThis, { window:dom.window, document:dom.window.document, HTMLElement:dom.window.HTMLElement, localStorage:dom.window.localStorage, location:dom.window.location, history:dom.window.history, IS_REACT_ACT_ENVIRONMENT:true });
   Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
   dom.window.HTMLDialogElement.prototype.showModal = function(){ this.open = true; };
@@ -240,6 +240,36 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
 
     // Verify the onboarding and dashboard use the real profile response.
     const { default:App, BalanceList } = await vite.ssrLoadModule('/src/App.jsx');
+    // Celebrate only a successfully reported payment; never confirm it implicitly.
+    const originalFetch=globalThis.fetch;
+    const liveDebt={id:'party',bill_id:'party-bill',debtor_id:'ali',creditor_id:'sara',amount:120000,status:'assigned'};
+    let reports=0;
+    const previewState={user,people:[user,sara],bills:[{...newBill('sara'),id:'party-bill',creatorId:'sara',status:'published',title:'Dinner',participants:['ali','sara']}],debts:[liveDebt],repayments:[],events:[]};
+    localStorage.setItem('tab-together-session','synthetic-celebration');
+    globalThis.fetch=async(url,options={})=>{
+      if(String(url).endsWith('/repayments')){
+        reports++;if(reports===1)return {ok:false,status:409,json:async()=>({error:'Test payment failed'})};
+        const body=JSON.parse(options.body);assert.equal(body.amountCents,50000);
+        liveDebt.pending_amount=50000;liveDebt.status='marked_paid';
+        const report={id:'test-party-report',amount:50000,status:'pending',debtor_id:'ali',creditor_id:'sara',allocations:[{debtId:liveDebt.id,billId:liveDebt.bill_id,amount:50000}]};
+        previewState.repayments=[report];return {ok:true,json:async()=>report};
+      }
+      assert.ok(String(url).endsWith('/state'),'celebration must never call confirmation');
+      return {ok:true,json:async()=>structuredClone(previewState)};
+    };
+    try {
+      render(React.createElement(App));await act(async()=>{});
+      fireEvent.click(screen.getByRole('button',{name:'I’ve paid',exact:true}));
+      fireEvent.change(screen.getByLabelText('Amount you paid'),{target:{value:'500'}});
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'I’ve paid — notify Sara'})));
+      assert.ok(screen.getByText('Test payment failed'));assert.equal(screen.queryByRole('region',{name:'Payment celebration'}),null);
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'I’ve paid — notify Sara'})));
+      const celebration=screen.getByRole('region',{name:'Payment celebration'});
+      assert.match(celebration.textContent,/Thank you for paying!/);assert.match(celebration.textContent,/500.00 reported to Sara/);assert.match(celebration.textContent,/Waiting for confirmation/);
+      assert.equal(liveDebt.status,'marked_paid');assert.equal(reports,2);
+      assert.equal(screen.queryByRole('button',{name:'Play celebration sound'}),null,'no absent song controls');
+      fireEvent.click(screen.getByRole('button',{name:'Close celebration'}));assert.equal(screen.queryByRole('region',{name:'Payment celebration'}),null);
+    }finally{cleanup();globalThis.fetch=originalFetch;localStorage.clear();}
     let paid;
     render(React.createElement(BalanceList,{debts:[{id:'outgoing',bill_id:'bill',debtor_id:'ali',creditor_id:'sara',amount:10000,status:'assigned'},{id:'incoming',bill_id:'bill',debtor_id:'sara',creditor_id:'ali',amount:20000,status:'assigned'}],user,person:pid=>pid==='ali'?user:sara,filter:'all',bills:[{id:'bill',title:'Test ride'}],onOpen(){},onPaid:debt=>{paid=debt.id;}}));
     assert.equal(screen.getAllByRole('button',{name:'I’ve paid'}).length,1);

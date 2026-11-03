@@ -22,6 +22,6 @@ if (dev) {
   app.get('/{*path}', (req, res) => res.sendFile(path.join(root, 'dist/index.html')));
 }
 const port = Number(process.env.PORT || 5173);
-const server = app.listen(port, '0.0.0.0', () => console.log(`Tab Together: http://localhost:${port}`));
+const server = app.listen(port, '0.0.0.0', () => console.log(`Paisay dou $: http://localhost:${port}`));
 server.on('error', error => { console.error(`Could not start the app: ${error.message}`); process.exitCode = 1; });
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close(async () => { await db.close(); process.exit(0); }));

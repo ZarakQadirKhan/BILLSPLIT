@@ -386,7 +386,7 @@ export function Profile({ user, emailDelivery, onClose, onSave, onRecovery, onUp
             checked={emailNotifications}
             onChange={(e) => setEmailNotifications(e.target.checked)}
           />{" "}
-          Email me about bill shares and payment updates
+          Email me about bills, payments and daily reminders
         </label>
         <label>
           Where should friends pay you?

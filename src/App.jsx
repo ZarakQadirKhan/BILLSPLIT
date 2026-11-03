@@ -278,9 +278,9 @@ export default function App() {
           }}
         >
           <span className="brand-icon">
-            t<span>+</span>
+            $
           </span>
-          tab together<span className="brand-dot">.</span>
+          Paisay dou<span className="brand-dot">$</span>
         </a>
         <span className="nav-label">YOUR SPACE</span>
         <nav>
@@ -699,7 +699,7 @@ export default function App() {
           )}
           <footer className="page-footer">
             <span>
-              tab together <span>·</span> Good friends. Clear tabs.
+              Paisay dou $ <span>·</span> Good friends. Clear tabs.
             </span>
             <span>
               <ShieldCheck size={13} /> No payment gateway

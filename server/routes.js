@@ -8,6 +8,7 @@ import { createReceiptScanner, validReceiptImage } from './receipt-scan.js';
 import { createReceiptPipeline } from './openai-receipt.js';
 import { createRepaymentService } from './repayments.js';
 import { payableAmount } from '../shared/payments.js';
+import { queueDailyReminders, validCronSecret } from './reminders.js';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -92,6 +93,14 @@ export async function createApi(dataDirectory, options = {}) {
     next();
   });
   api.use(express.json({ limit: '1mb' }));
+  api.get('/cron/reminders',async(req,res)=>{
+    if(req.method!=='GET'||!validCronSecret(req.get('authorization'),options.cronSecret??process.env.CRON_SECRET))return res.status(401).json({error:'Unauthorized'});
+    if(req.query.dryRun==='1')return res.json({ok:true,configured:mail.enabled,schedule:'0 19 * * *',timezone:'Asia/Karachi',dryRun:true});
+    if(!mail.enabled)return res.status(503).json({error:'Email sender is not configured.'});
+    const result=await queueDailyReminders(db,{now:options.clock?.()??new Date()});
+    await mail.flush({limit:100});
+    res.json({ok:true,...result});
+  });
   api.use(async (req, res, next) => {
     const token = req.get('authorization')?.replace(/^Bearer /, '');
     if (token) {

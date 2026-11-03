@@ -1,4 +1,4 @@
-# Tab Together
+# Paisay dou $
 
 A bill-splitting app for a group of friends. Built with React, Vite, Express, MongoDB, and Tesseract.js. Optional receipt scanning uses paid GPT-6 Sol to transcribe a table and GPT-6 Luna to format JSON, with Gemini 3.8 Flash and free on-device OCR as fallbacks. Manual bills need no photo or AI. No payment gateway. Deployment uses Vercel Hobby and MongoDB Atlas Free; see [DEPLOYMENT.md](DEPLOYMENT.md).
 
@@ -52,6 +52,10 @@ Choose **Add a bill → inDrive ride**, enter the complete fare, select everyone
 For example, Rs 1,200 shared by four passengers is Rs 300 each. The payer sees Rs 900 to collect, with three Rs 300 requests.
 
 ## Email notifications and payment approval
+
+Daily reminder emails use one random quote from the 100 owner-supplied templates. Each message includes the recipient's actual display name, their current still-payable total, and a per-friend breakdown. Confirmed amounts and payments awaiting confirmation are excluded. Balances are checked before queueing and rebuilt immediately before every delivery attempt; reminders are canceled when nothing is payable, email is unverified/disabled/changed, or the daily message has expired. Each recipient/day has a unique outbox ID to prevent duplicate scheduler invocations from generating extra reminders.
+
+Vercel's free daily cron is configured as `0 19 * * *` (00:00 Asia/Karachi). **Hobby scheduling can run any time during 00:00–00:59; exact midnight is not guaranteed.** The scheduler does not require anyone to keep the app open. Set a private random `CRON_SECRET` of at least 32 characters in Production. `/api/cron/reminders` accepts only GET requests bearing that secret; `?dryRun=1` checks configuration without queueing or sending messages. The existing shared 100-attempt daily mail cap remains in force; throttling or sender failures can delay or prevent delivery. Users can turn off notification emails in Profile. No new paid service or LLM calls are used for reminders.
 
 Add an email address during signup or in Profile, then enter the emailed six-digit verification code. Codes expire after 15 minutes and lock after five incorrect attempts. Email addresses remain private to their owner; they are not included in friends' profiles. Users can disable notification emails in Profile.
 

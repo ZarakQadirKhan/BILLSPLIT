@@ -53,7 +53,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     const manual={...bill,entryMode:'manual',receiptTotalCents:null};
     manual.items[0].allocations=[{personId:'ali',quantity:1},{personId:'sara',quantity:1}];
     render(React.createElement(BillEditor,{initial:manual,people:[user,{...sara,paymentDetails:'TEST Sara'}],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
-    assert.equal(screen.queryByRole('button',{name:'Choose a photo'}),null);
+    assert.equal(screen.queryByRole('button',{name:'Scan',exact:true}),null);
     fireEvent.click(screen.getByRole('button',{name:'Add item'}));
     assert.ok(screen.getByLabelText('Item 2 name'));
     cleanup();
@@ -95,17 +95,31 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     try {
       const scanning=newBill('ali'); scanning.adjustmentCents=5000; scanning.adjustmentReason='Old receipt adjustment';
       const {container}=render(React.createElement(BillEditor,{initial:scanning,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
-      assert.equal(screen.getByLabelText('Receipt reader').value,'ai');
+      assert.equal(screen.getByLabelText('Keep photo on this device').checked,false);
       await act(async()=>fireEvent.change(container.querySelector('input[type=file]'),{target:{files:[new dom.window.File(['synthetic'],'receipt.jpg',{type:'image/jpeg'})]}}));
-      assert.ok(screen.getByRole('heading',{name:'Read with AI?'}));
-      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Scan with AI'})));
-      assert.ok(screen.getByText('Read with Gemini'));
+      assert.ok(screen.getByRole('heading',{name:'Scan this receipt?'}));
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Scan receipt'})));
+      assert.ok(screen.getByText('Ready to review'));
+      assert.equal(screen.queryByText(/Read with Gemini|GPT-6|on-device OCR/),null);
       assert.equal(screen.getByLabelText('Item 1 quantity').value,'2');
       assert.equal(screen.getByLabelText('Discount percentage').value,'50');
       assert.equal(screen.getByLabelText('Discount eligible amount limit').value,'20000');
       assert.ok(screen.getByText('Matches your receipt'),'exact printed tax wins over percentage and old adjustment is cleared');
-      fireEvent.change(screen.getByLabelText('Receipt reader'),{target:{value:'private'}});
-      assert.ok(screen.getByText(/Private mode keeps the photo on your device/));
+      fireEvent.change(screen.getByLabelText('Item 1 name'),{target:{value:'Corrected dinner'}});
+      fireEvent.change(screen.getByLabelText('Item 1 quantity'),{target:{value:'3'}});
+      fireEvent.change(screen.getByLabelText('Item 1 unit price'),{target:{value:'10000'}});
+      assert.equal(screen.getByLabelText('Item 1 name').value,'Corrected dinner');
+      assert.ok(screen.getByText('Matches your receipt'),'editing scanned quantity and price recalculates');
+      fireEvent.change(screen.getByLabelText('Discount percentage'),{target:{value:'40'}});
+      assert.ok(screen.getByText(/difference/));
+      fireEvent.change(screen.getByLabelText('Final charged amount'),{target:{value:'22100'}});
+      assert.ok(screen.getByText('Matches your receipt'));
+      fireEvent.change(screen.getByLabelText('Tax amount'),{target:{value:'200'}});
+      assert.ok(screen.getByText(/difference/),'scanned tax remains editable');
+      fireEvent.change(screen.getByLabelText('Final charged amount'),{target:{value:'22200'}});
+      assert.ok(screen.getByText('Matches your receipt'));
+      fireEvent.click(screen.getByLabelText('Keep photo on this device'));
+      assert.equal(screen.getByLabelText('Keep photo on this device').checked,true);
     } finally {
       cleanup(); globalThis.fetch=savedFetch;
       if(savedBitmap) globalThis.createImageBitmap=savedBitmap; else delete globalThis.createImageBitmap;

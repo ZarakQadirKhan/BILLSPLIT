@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { randomUUID } from 'node:crypto';
 import { money } from '../shared/calculations.js';
 import { remainingAmount } from '../shared/payments.js';
+import { reminderContent } from './reminders.js';
 
 // Never serialize an SMTP error: its message/response can contain private data.
 export function emailDiagnostic(error) {
@@ -17,6 +18,7 @@ export function createEmailService(db, options = {}) {
   const password = process.env.GMAIL_APP_PASSWORD;
   const baseUrl = options.baseUrl ?? process.env.APP_BASE_URL;
   const enabled = options.enabled ?? !!(from && (options.transport || password) && baseUrl);
+  const clock=options.clock||(()=>new Date());
   let transport, running;
   const report = options.report || ((event, diagnostic) => console.info('Email diagnostic:', JSON.stringify({ event, ...diagnostic })));
   if (enabled) {
@@ -66,17 +68,25 @@ export function createEmailService(db, options = {}) {
         const message = await db.claimEmail();
         if (!message) break;
         const recipient = await db.one('users', { id: message.user_id });
-        const valid = recipient?.email === message.to && (message.kind === 'verification'
+        const valid = recipient?.email === message.to && (message.kind==='reminder'
+          ? recipient?.claimed&&recipient.email_verified&&recipient.email_notifications!==false
+          : message.kind === 'verification'
           ? !recipient.email_verified && recipient.email_code_hash === message.code_hash && new Date(recipient.email_code_expires) > new Date()
           : recipient.email_verified && recipient.email_notifications !== false && message.expected_status.includes((await db.one(message.repayment_id?'repayments':'debts', { id: message.repayment_id||message.debt_id }))?.status));
         if (!valid) { await db.update('email_outbox', { id: message.id }, { $set: { status: 'canceled', delete_after: new Date(Date.now() + 86400000) }, $unset: { text: '' } }); continue; }
+        if(message.kind==='reminder'&&!await reminderContent(db,message,recipient,clock())) {
+          await db.update('email_outbox',{id:message.id},{$set:{status:'canceled',delete_after:new Date(Date.now()+86400000)}});
+          continue;
+        }
         // Conservative cap below Gmail's published personal-account limit. Never buy overages.
         if (!await db.reserveEmailAttempt(100)) {
           await db.update('email_outbox', { id: message.id }, { $set: { status: 'pending', retry_at: new Date(Date.now() + 3600000) } });
           break;
         }
         try {
-          await transport.sendMail({ from: { name: 'Tab Together', address: from }, to: message.to, subject: `Tab Together: ${message.subject}`, messageId: `<${message.id}@${new URL(baseUrl).hostname}>`, text: `${message.text}\n\nOpen Tab Together: ${link(message.bill_id)}\n\nNo money moves through this app. Only the recipient can confirm receipt after signing in. Manage email notifications in Your profile.` });
+          const content=message.kind==='reminder'?await reminderContent(db,message,await db.one('users',{id:message.user_id}),clock()):message;
+          if(!content){await db.update('email_outbox',{id:message.id},{$set:{status:'canceled',delete_after:new Date(Date.now()+86400000)},$unset:{text:''}});continue;}
+          await transport.sendMail({ from: { name: 'Paisay dou $', address: from }, to: message.to, subject: `Paisay dou $: ${content.subject}`, messageId: `<${message.id}@${new URL(baseUrl).hostname}>`, text: `${content.text}\n\nOpen Paisay dou $: ${message.kind==='reminder'?`${baseUrl}/`:link(message.bill_id)}\n\nNo money moves through this app. Only the recipient can confirm receipt after signing in. Manage email notifications in Your profile.` });
           await db.update('email_outbox', { id: message.id }, { $set: { status: 'sent', sent_at: new Date(), delete_after: new Date(Date.now() + 7 * 86400000) }, $unset: { text: '', code_hash: '', last_error: '' } });
         } catch (error) {
           const diagnostic = emailDiagnostic(error);

@@ -42,10 +42,8 @@ export default function BillEditor({
     [entryMode, setEntryMode] = useState(initial.entryMode || "scan"),
     [image, setImage] = useState(""),
     [raw, setRaw] = useState(""),
-    [transcription, setTranscription] = useState(""),
     [scanMode, setScanMode] = useState("ai"),
     [scanSource, setScanSource] = useState(""),
-    [scanNotice, setScanNotice] = useState(""),
     [awaitingConsent, setAwaitingConsent] = useState(false),
     [warnings, setWarnings] = useState([]),
     [error, setError] = useState(""),
@@ -127,10 +125,8 @@ export default function BillEditor({
     }));
   };
   const applyText = (text) => {
-    setTranscription("");
     applyParsed(parseReceipt(text));
-    setScanSource("Text extraction");
-    setScanNotice("");
+    setScanSource("Ready to review");
   };
   const upload = async (file) => {
     if (!file || progress) return;
@@ -142,9 +138,7 @@ export default function BillEditor({
     )
       return;
     setError("");
-    setScanNotice("");
     setScanSource("");
-    setTranscription("");
     setProgress({ status: "Preparing your receipt", progress: 0 });
     try {
       const blob = await prepareImage(file);
@@ -157,21 +151,12 @@ export default function BillEditor({
             })
           : false;
       if (useAI === null) {
-        setScanNotice("Scan cancelled. Bill details were not changed.");
         return;
       }
-      const extraction = await extractReceipt(blob, setProgress, { useAI });
+      const extraction = await extractReceipt(blob, update=>setProgress({status:'Scanning receipt',progress:update.progress}), { useAI });
       setRaw(extraction.text);
-      setTranscription(extraction.transcription || "");
       applyParsed(extraction.parsed);
-      setScanSource(
-        extraction.source === "openai"
-          ? "Read with GPT-6 Sol · formatted with Luna"
-          : extraction.source === "gemini"
-            ? "Read with Gemini"
-            : "Read with on-device OCR",
-      );
-      setScanNotice(extraction.fallback || "");
+      setScanSource("Ready to review");
       notify("Receipt read. Please check every item and the final total.");
     } catch (e) {
       setError(
@@ -236,31 +221,25 @@ export default function BillEditor({
   return (
     <>
       {awaitingConsent && (
-        <Modal title="Read with AI?" onClose={() => finishConsent(null)}>
+        <Modal title="Scan this receipt?" onClose={() => finishConsent(null)}>
           <p className="muted">
-            This sends the photo to OpenAI, then Google if needed. First crop or
-            cover names, phone numbers, addresses and payment details in your
-            photo editor.
+            Your photo will be sent to our scanning service. Cover any personal
+            or payment details first. Our app doesn’t save photos.
           </p>
           <img
             src={image}
-            alt="Receipt to review before sending to AI providers"
+            alt="Receipt to review before scanning"
             style={{ width: "100%", maxHeight: 200, objectFit: "contain" }}
           />
-          <p className="muted">
-            GPT-6 Sol uses the app owner’s API credit within our spending limit.
-            Gemini is the backup; Google’s free tier may use photos for
-            improvement and human review. Our app does not save photos. If both
-            fail, OCR runs on your device.
-          </p>
+          <details className="optional-fields"><summary>Photo privacy</summary><p className="muted">Scans use OpenAI and, if needed, Google. Google’s free service may use photos for improvement and human review. Choose “Keep on my device” if you don’t want to share the photo.</p></details>
           <button
             className="button primary full"
             onClick={() => finishConsent(true)}
           >
-            Scan with AI
+            Scan receipt
           </button>
           <button className="button full" onClick={() => finishConsent(false)}>
-            Keep private · use on-device OCR
+            Keep on my device
           </button>
         </Modal>
       )}
@@ -326,7 +305,7 @@ export default function BillEditor({
                     <ReceiptMark /> The receipt
                   </h2>
                   <span className="badge">
-                    {entryMode === "manual" ? "Manual entry" : scanSource || "AI + OCR backup"}
+                    {entryMode === "manual" ? "Manual entry" : scanSource || "Scan"}
                   </span>
                 </div>
                 <div className="tabs" role="group" aria-label="Bill entry method">
@@ -334,29 +313,7 @@ export default function BillEditor({
                   <button className={entryMode === "manual" ? "active" : ""} onClick={() => setEntryMode("manual")}>Enter manually</button>
                 </div>
                 {entryMode === "manual" ? <p className="muted">Give the bill a name, add each item and price below, then choose who had what. No photo needed.</p> : <>
-                <label className="scan-mode">
-                  Receipt reader
-                  <select
-                    value={scanMode}
-                    disabled={!!progress}
-                    onChange={(e) => setScanMode(e.target.value)}
-                  >
-                    <option value="ai">AI · OpenAI → Gemini → OCR</option>
-                    <option value="private">
-                      Private · on-device OCR only
-                    </option>
-                  </select>
-                </label>
-                <p className="footnote">
-                  {scanMode === "ai"
-                    ? "GPT-6 Sol reads the photo; Luna formats the details. Gemini and private OCR are backups. You’ll review the photo before sharing it. Our app never saves receipt photos."
-                    : "Private mode keeps the photo on your device. No image is sent to AI providers or our server."}
-                </p>
-                {scanNotice && (
-                  <p className="notice" role="status">
-                    {scanNotice}
-                  </p>
-                )}
+                <details className="optional-fields"><summary>Scan privacy</summary><label className="checkbox-label"><input type="checkbox" checked={scanMode==='private'} disabled={!!progress} onChange={e=>setScanMode(e.target.checked?'private':'ai')}/> Keep photo on this device</label><p className="footnote">Device-only scanning does not send your photo to a server.</p></details>
                 <input
                   ref={fileRef}
                   type="file"
@@ -390,7 +347,7 @@ export default function BillEditor({
                     <p>
                       {progress
                         ? `${progress.status} · ${Math.round(progress.progress * 100)}%`
-                        : "Only reviewed bill details are saved. You can also enter items manually. Leaving the editor discards this photo preview."}
+                        : "Scan, check, and edit anything below. Photos aren’t saved."}
                     </p>
                     {progress ? (
                       <progress
@@ -404,12 +361,11 @@ export default function BillEditor({
                         onClick={() => fileRef.current.click()}
                       >
                         <Upload size={16} />
-                        {image ? "Replace receipt" : "Choose a photo"}
+                        {image ? "Scan another receipt" : "Scan"}
                       </button>
                     )}
                   </div>
                 </div>
-                {transcription && <details className="ocr-text"><summary>See what AI read</summary><p className="muted">Temporary transcription for comparison. Correct the editable items below; this table is not saved with the bill.</p><pre className="receipt-transcription">{transcription}</pre></details>}
                 <details className="ocr-text">
                   <summary>Paste or review receipt text</summary>
                   <p className="muted">
@@ -483,6 +439,7 @@ export default function BillEditor({
                     <Plus size={16} /> Add item
                   </button>
                 </div>
+                <p className="muted">Everything is editable: correct names, quantities and prices, or add and remove items. Discount, tax and the final total are editable too.</p>
                 {!bill.items.length ? (
                   <Empty
                     icon={ScanLine}
@@ -756,6 +713,7 @@ export default function BillEditor({
                     <label>
                       Tax amount
                       <MoneyInput
+                        aria-label="Tax amount"
                         value={bill.tax.amountCents}
                         onChange={(value) =>
                           change({ tax: { ...bill.tax, amountCents: value } })

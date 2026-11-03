@@ -92,3 +92,8 @@ Images are validated, limited to 2 MB after device preparation, and sent inline 
 The current Atlas Free storage limit is 512 MB including indexes. Photos are not stored, leaving space for bill records. Notifications refresh in-app every 30 seconds while visible; there is no background push. Actual payments take place through cash, bank or wallet outside this app. Only recipient confirmation changes a debt to paid.
 
 Sources: [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Atlas Free limits](https://www.mongodb.com/docs/atlas/reference/free-shared-limitations/). Account setup and a successful deployed smoke test are required before claiming the app is live.
+## Daily reminders
+
+The production Vercel cron calls `/api/cron/reminders` at `0 19 * * *` UTC, which is midnight in Pakistan. On Hobby it may run anywhere within that hour. Add `CRON_SECRET` as a sensitive Production variable (at least 32 random characters) and redeploy. Never expose it with a `VITE_` prefix. The existing Gmail sender is used, within the shared app-wide mail cap; no paid scheduler is required. With the same Bearer secret, `?dryRun=1` verifies configuration without sending or queueing reminders. An unauthorized call returns 401.
+
+Only claimed profiles with verified emails and enabled email notifications are eligible. Already-confirmed payments and amounts pending confirmation are excluded. Duplicate daily triggers are deduplicated; queued reminders re-read balances at send time and expire on the next Pakistan calendar day.

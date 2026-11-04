@@ -24,6 +24,7 @@ import {
   Utensils,
   Car,
   Pencil,
+  MapPin,
 } from "lucide-react";
 import {
   calculate,
@@ -53,8 +54,11 @@ import { payableAmount, remainingAmount } from "../shared/payments.js";
 import { readDrafts, removeDraft } from './drafts.js';
 import PaymentCelebration from './PaymentCelebration.jsx';
 import {createCelebrationAudio} from './celebration-audio.js';
+import {CreateOuting,MoveBillOuting,AddExistingBill,OutingList,OutingDetails} from './Outings.jsx';
+import {repeatBill} from './repeat-bill.js';
 
 export default function App() {
+  const [outingId,setOutingId]=useState(null),[billSection,setBillSection]=useState('bills');
   const [celebration,setCelebration]=useState(null);
   const [celebrationAudio]=useState(()=>createCelebrationAudio());
   const closeCelebration=useCallback(()=>setCelebration(null),[]);
@@ -67,6 +71,7 @@ export default function App() {
     [detailId, setDetailId] = useState(null),
     [modal, setModal] = useState(null),
     [toast, setToast] = useState("");
+  useEffect(()=>{window.scrollTo(0,0);},[view,detailId,outingId,!!editor]);
   const [inviteToken] = useState(() =>
     new URLSearchParams(location.hash.slice(1)).get("join"),
   );
@@ -124,6 +129,7 @@ export default function App() {
     user = state?.user,
     bills = state?.bills || [],
     debts = state?.debts || [];
+  const outings=state?.outings||[],outing=outings.find(o=>o.id===outingId);
   const [localDrafts,setLocalDrafts]=useState([]);
   useEffect(()=>{
     if(!user)return;
@@ -157,9 +163,11 @@ export default function App() {
     .filter((d) => d.creditor_id === user?.id)
     .reduce((sum, d) => sum + payableAmount(d), 0);
   const unread = state?.events.filter((e) => !e.is_read).length || 0;
-  const startBill = () => setModal({ type: "billType" });
+  const startBill = () => setModal({ type: "billType",outingId:outing?.id });
   const startSelectedBill = (kind) => {
-    setEditor(kind === "ride" ? newRideBill(user.id) : { ...newBill(user.id), entryMode: kind === "manual" ? "manual" : "scan" });
+    const group=outings.find(o=>o.id===modal?.outingId);
+    const fresh=kind === "ride" ? newRideBill(user.id) : { ...newBill(user.id), entryMode: kind === "manual" ? "manual" : "scan" };
+    setEditor({...fresh,...(group?{outingId:group.id,participants:[...group.members]}:{})});
     setDetailId(null);
     setModal(null);
   };
@@ -175,6 +183,7 @@ export default function App() {
     setEditor(null);
     setDetailId(null);
     setView(target);
+    setOutingId(null);
     setFilter("all");
   };
   useEffect(() => {
@@ -341,6 +350,7 @@ export default function App() {
               ? "New bill"
               : detail
                 ? "Bill details"
+                : outing ? "Outing details"
                 : {
                     overview: "Home",
                     bills: "Your bills",
@@ -410,7 +420,7 @@ export default function App() {
               </button>
             </div>
           )}
-          {user&&!editor&&!detail&&localDrafts.length>0&&<section className="card resume-drafts"><h2>Pick up where you left off</h2><p className="muted">Unfinished bills saved on this device. Photos aren’t saved.</p>{localDrafts.map(d=><div className="draft-row" key={d.id}><button className="button" onClick={()=>{const remote=bills.find(b=>b.id===d.bill.id);if(remote?.status==='published'){removeDraft(user.id,d.id);setDetailId(remote.id);return;}setEditor(d.bill);setDetailId(null);}}>Continue {d.bill.title||'untitled bill'}</button><button className="text-button" onClick={()=>{if(window.confirm('Discard this device’s unfinished draft? This cannot be undone.')){removeDraft(user.id,d.id);notify('Device draft discarded.');}}}>Discard</button></div>)}</section>}
+          {user&&!editor&&!detail&&!outing&&localDrafts.length>0&&<section className="card resume-drafts"><h2>Pick up where you left off</h2><p className="muted">Unfinished bills saved on this device. Photos aren’t saved.</p>{localDrafts.map(d=><div className="draft-row" key={d.id}><button className="button" onClick={()=>{const remote=bills.find(b=>b.id===d.bill.id);if(remote?.status==='published'){removeDraft(user.id,d.id);setDetailId(remote.id);return;}setEditor(d.bill);setDetailId(null);}}>Continue {d.bill.title||'untitled bill'}</button><button className="text-button" onClick={()=>{if(window.confirm('Discard this device’s unfinished draft? This cannot be undone.')){removeDraft(user.id,d.id);notify('Device draft discarded.');}}}>Discard</button></div>)}</section>}
           {loading ? (
             <div className="loading">
               <Loader2 className="spin" /> Opening your tab…
@@ -431,6 +441,7 @@ export default function App() {
           ) : editor ? (
             <Editor
               initial={editor}
+              outings={outings}
               people={people}
               user={user}
               onAddFriend={() => setModal({ type: "addFriend" })}
@@ -456,6 +467,10 @@ export default function App() {
               bills={bills}
               repayments={state.repayments || []}
               bill={detail}
+              outing={outings.find(o=>o.id===detail.outingId)}
+              onOpenOuting={()=>{setOutingId(detail.outingId);setDetailId(null);setView('bills');}}
+              onMoveOuting={()=>setModal({type:'moveOuting',bill:detail})}
+              onRepeat={()=>{setEditor(repeatBill(detail));setDetailId(null);setOutingId(null);notify('New draft ready. Review the amount and payer before sending.');}}
               debts={debts.filter((d) => d.bill_id === detail.id)}
               person={person}
               user={user}
@@ -471,6 +486,8 @@ export default function App() {
               }
               onCopy={copy}
             />
+          ) : outing ? (
+            <OutingDetails key={outing.id} outing={outing} bills={bills} debts={debts} user={user} person={person} onBack={()=>{setOutingId(null);setView('bills');setBillSection('outings');}} onOpen={setDetailId} onCreate={startBill} onRename={()=>setModal({type:'renameOuting',outing})} onAddExisting={()=>setModal({type:'existingOuting',outing})} onPaid={debt=>setModal({type:'payment',debt,action:'paid'})}/>
           ) : (
             <>
               {invite && (
@@ -536,10 +553,13 @@ export default function App() {
                   {view === "friends" ? "Add a friend" : "New split"}
                 </button>}
               </div>
-              {view === "overview" && <HomeOverview debts={debts} repayments={state.repayments || []} user={user} person={person} bills={bills} onOpen={setDetailId} onAction={(debt, action) => setModal({ type: 'payment', debt, action })} onCreate={startSelectedBill} onBills={() => navigate('bills')}>
+              {view==='overview'&&<button className="outing-shortcut" onClick={()=>{navigate('bills');setBillSection('outings');}}><MapPin size={24}/><span><strong>Outings & trips</strong><small>All the meals, rides and little extras in one place.</small></span><ChevronRight size={18}/></button>}
+              {view==='bills'&&<div className="tabs bill-section-switch" role="group" aria-label="Browse bills or outings"><button className={billSection==='bills'?'active':''} aria-pressed={billSection==='bills'} onClick={()=>setBillSection('bills')}>Individual bills</button><button className={billSection==='outings'?'active':''} aria-pressed={billSection==='outings'} onClick={()=>setBillSection('outings')}>Outings & trips</button></div>}
+              {view==='bills'&&billSection==='outings'&&<OutingList outings={outings} bills={bills} debts={debts} onOpen={setOutingId} onCreate={()=>setModal({type:'createOuting'})}/>}
+              {view === "overview" && <HomeOverview debts={debts} repayments={state.repayments || []} user={user} person={person} bills={bills} onOpen={setDetailId} onAction={(debt, action) => setModal({ type: 'payment', debt, action })} onCreate={startSelectedBill} onBills={() => {navigate('bills');setBillSection('bills');}}>
                 <BillList bills={bills.slice(0, 4)} debts={debts} person={person} onOpen={setDetailId} onCreate={startBill}/>
               </HomeOverview>}
-              {view === "bills" && (
+              {view === "bills" && billSection==='bills' && (
                 <section className="card">
                   <div className="list-toolbar">
                     <div className="tabs">
@@ -750,6 +770,10 @@ export default function App() {
           </div>
         </Modal>
       )}
+      {modal?.type==='createOuting'&&<CreateOuting people={people} user={user} onClose={()=>setModal(null)} onSubmit={async data=>{const created=await request('/outings',{method:'POST',body:data});await refresh();setOutingId(created.id);setDetailId(null);setView('bills');setBillSection('outings');setModal(null);notify('Outing created. Add your first expense.');}}/>}
+      {modal?.type==='renameOuting'&&<NameModal title="Rename outing" label="Outing name" initialName={modal.outing.title} maxLength={120} button="Save name" onClose={()=>setModal(null)} onSubmit={async title=>{await request(`/outings/${modal.outing.id}`,{method:'PATCH',body:{title,version:modal.outing.version}});await refresh();setModal(null);notify('Outing renamed');}}/>}
+      {modal?.type==='moveOuting'&&<MoveBillOuting bill={modal.bill} outings={outings} onClose={()=>setModal(null)} onSubmit={async target=>{await request(`/bills/${modal.bill.id}/outing`,{method:'PATCH',body:{outingId:target,version:modal.bill.version}});await refresh();setModal(null);notify('Bill organization updated. Repayments are unchanged.');}}/>}
+      {modal?.type==='existingOuting'&&<AddExistingBill outing={modal.outing} bills={bills} user={user} onClose={()=>setModal(null)} onSubmit={async bill=>{await request(`/bills/${bill.id}/outing`,{method:'PATCH',body:{outingId:modal.outing.id,version:bill.version}});await refresh();setModal(null);notify('Bill added to the outing');}}/>}
       {modal?.type === "profile" && (
         <Profile
           user={user}

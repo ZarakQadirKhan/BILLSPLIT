@@ -271,8 +271,8 @@ export function Onboarding({ invite, onSubmit }) {
     </section>
   );
 }
-export function NameModal({ title, label, button, onSubmit, onClose }) {
-  const [name, setName] = useState(""),
+export function NameModal({ title, label, button, onSubmit, onClose,initialName='',maxLength=60 }) {
+  const [name, setName] = useState(initialName),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   return (
@@ -294,7 +294,7 @@ export function NameModal({ title, label, button, onSubmit, onClose }) {
           {label}
           <input
             autoFocus
-            maxLength={60}
+            maxLength={maxLength}
             value={name}
             onChange={(e) => setName(e.target.value)}
             required

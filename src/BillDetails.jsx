@@ -27,6 +27,10 @@ export default function BillDetails({
   onEdit,
   onAction,
   onCopy,
+  onRepeat,
+  outing,
+  onOpenOuting,
+  onMoveOuting,
 }) {
   const isRide = bill.kind === "ride";
   const result = calculate(bill),
@@ -61,6 +65,7 @@ export default function BillDetails({
           </p>
         </div>
         <div className="heading-actions">
+          {onRepeat&&<button className="button" onClick={onRepeat}><Copy size={16}/> Do this again</button>}
           <Badge status={settled ? "confirmed" : bill.status} />
           {bill.status === "draft" && bill.creatorId === user.id && (
             <button className="button primary" onClick={onEdit}>
@@ -69,6 +74,7 @@ export default function BillDetails({
           )}
         </div>
       </div>
+      <div className="outing-actions">{outing&&<button className="button" onClick={onOpenOuting}>In {outing.title}</button>}{bill.creatorId===user.id&&onMoveOuting&&<button className="text-button" onClick={onMoveOuting}>{outing?'Change outing':'Add to an outing'}</button>}</div>
       {bill.status === "draft" && (
         <div className="notice">
           <AlertCircle size={18} />

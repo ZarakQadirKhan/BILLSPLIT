@@ -52,7 +52,14 @@ export async function createApi(dataDirectory, options = {}) {
   async function knownPeople(userId) {
     const contacts = await db.many('contacts', { owner_id: userId });
     const bills = await db.many('bills', { participants: userId, status: 'published' });
-    return new Set([userId, ...contacts.map(row => row.person_id), ...bills.flatMap(row => row.participants)]);
+    const outings=await db.many('outings',{members:userId});
+    return new Set([userId, ...contacts.map(row => row.person_id), ...bills.flatMap(row => row.participants),...outings.flatMap(o=>o.members)]);
+  }
+  async function checkOuting(outingId,userId,participants) {
+    if(outingId==null)return;
+    const outing=await db.one('outings',{id:outingId,members:userId});
+    if(!outing)fail('This outing is not available to your profile.',403);
+    if(participants.some(id=>!outing.members.includes(id)))fail('Everyone on this bill must be in the outing. Choose another outing or keep this bill separate.');
   }
   async function claim(token, existingId) {
     const invitation = await db.one('invitations', { id: hash(token) });
@@ -61,6 +68,9 @@ export async function createApi(dataDirectory, options = {}) {
     if (!placeholder || placeholder.claimed) fail('This profile has already been claimed.');
     const targetId = existingId || placeholder.id;
     if (existingId && existingId !== placeholder.id) {
+      for(const outing of await db.many('outings',{members:placeholder.id})) {
+        await db.update('outings',{id:outing.id},{$set:{members:[...new Set(outing.members.map(id=>id===placeholder.id?existingId:id))]}});
+      }
       for (const row of await db.many('bills', { participants: placeholder.id })) {
         const bill = row.data;
         if (bill.participants.includes(existingId)) fail('You already participate in a bill under another profile. Ask the bill creator to correct the invitation.');
@@ -160,16 +170,18 @@ export async function createApi(dataDirectory, options = {}) {
     await deliver();
     const userId = req.user.id;
     const state = await db.transaction(async () => {
-      const rows = await db.many('bills', { $or: [{ creator_id: userId }, { participants: userId, status: 'published' }] }, { sort: { created_at: -1 } });
+      const outings=await db.many('outings',{members:userId},{sort:{createdAt:-1}});
+      const rows = await db.many('bills', { $or: [{ creator_id: userId }, { participants: userId, status: 'published' }, {'data.outingId':{$in:outings.map(o=>o.id)},status:'published'}] }, { sort: { created_at: -1 } });
       const contacts = await db.many('contacts', { owner_id: userId });
       const visible = new Set([userId, ...contacts.map(row => row.person_id)]);
       for (const row of rows) { visible.add(row.creator_id); for (const p of row.participants) visible.add(p); }
+      for(const outing of outings)for(const id of outing.members)visible.add(id);
       const people = await db.many('users', { id: { $in: [...visible] } });
       const debts = await db.many('debts', { bill_id: { $in: rows.map(row => row.id) } });
       const repayments = await db.many('repayments', { $or: [{ debtor_id: userId }, { creditor_id: userId }] }, { sort: { created_at: -1 } });
       const events = await db.many('events', { user_id: userId }, { sort: { created_at: -1 }, limit: 200 });
       const emailQueue = await db.many('email_outbox', { user_id: userId, status: { $in: ['pending', 'sending', 'failed'] } }, { projection: { _id: 0, status: 1, last_error: 1 }, sort: { created_at: -1 } });
-      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), bills: rows.map(billResult), debts: debts.map(debtResult), repayments, events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
+      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), outings, bills: rows.map(billResult), debts: debts.map(debtResult), repayments, events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
     });
     res.json(state);
   });
@@ -247,6 +259,37 @@ export async function createApi(dataDirectory, options = {}) {
   });
   // Images stay in the browser. Reject upload attempts from older clients.
   api.post('/receipts', (req, res) => res.status(410).json({ error: 'Receipt photos are no longer uploaded. Refresh the app to scan on your device.' }));
+  api.post('/outings',async(req,res)=>{
+    const title=clean(req.body.title,120),members=req.body.members;
+    if(!title)fail('Give your outing a name.');
+    if(!Array.isArray(members)||!members.length||members.length>50||members.some(id=>typeof id!=='string'||!id||id.length>100)||new Set(members).size!==members.length||!members.includes(req.user.id))fail('Choose up to 50 friends, including yourself.');
+    const outing=await db.transaction(async()=>{
+      const known=await knownPeople(req.user.id);
+      if(members.some(id=>!known.has(id)))fail('Choose people from your friends list.',403);
+      const found=await db.updateMany('users',{id:{$in:members}},{$inc:{bill_revision:1}});
+      if(found.matchedCount!==members.length)fail('A friend’s profile changed. Refresh and try again.',409);
+      const row={id:randomUUID(),creatorId:req.user.id,title,members,createdAt:now(),version:1};await db.insert('outings',row);return row;
+    });res.status(201).json(outing);
+  });
+  api.patch('/outings/:id',async(req,res)=>{
+    const title=clean(req.body.title,120);if(!title)fail('Give your outing a name.');
+    if(!Number.isSafeInteger(req.body.version))fail('Refresh the outing and try again.',409);
+    const changed=await db.update('outings',{id:req.params.id,creatorId:req.user.id,version:req.body.version},{$set:{title},$inc:{version:1}});
+    if(!changed.matchedCount)fail('This outing changed or you cannot rename it. Refresh and try again.',409);
+    res.json(await db.one('outings',{id:req.params.id}));
+  });
+  api.patch('/bills/:id/outing',async(req,res)=>{
+    const outingId=req.body.outingId??null;
+    if(outingId!==null&&(typeof outingId!=='string'||!outingId||outingId.length>100))fail('Choose a valid outing.');
+    const bill=await db.transaction(async()=>{
+      const row=await db.one('bills',{id:req.params.id});
+      if(!row||row.creator_id!==req.user.id)fail('Only the bill creator can move this bill.',403);
+      if(row.version!==req.body.version)fail('This bill changed. Reopen it before moving it.',409);
+      await checkOuting(outingId,req.user.id,row.participants);
+      await db.update('bills',{id:row.id},{$set:{'data.outingId':outingId},$inc:{version:1}});
+      return billResult(await db.one('bills',{id:row.id}));
+    });res.json(bill);
+  });
   async function saveBill(req, existingId) {
     // Rebuild rides on the server so a modified client cannot create unequal fares.
     const bill = validateBill(req.body?.bill);
@@ -257,6 +300,7 @@ export async function createApi(dataDirectory, options = {}) {
       if (existing && existing.status !== 'draft') fail('Published bills are locked. Create a corrected bill instead.', 409);
       if (existing && req.body.version !== existing.version) fail('This bill changed on another device. Reopen it to load the latest version.', 409);
       const known = await knownPeople(req.user.id), priorParticipants = existing?.participants || [];
+      await checkOuting(bill.outingId,req.user.id,bill.participants);
       for (const p of bill.participants) if (!known.has(p) && !priorParticipants.includes(p)) fail('Choose people from your friends list.');
       const people = await db.updateMany('users', { id: { $in: bill.participants } }, { $inc: { bill_revision: 1 } });
       if (people.matchedCount !== bill.participants.length) fail('A participant changed their profile. Refresh your friends list.', 409);
@@ -275,6 +319,7 @@ export async function createApi(dataDirectory, options = {}) {
       if (row.status !== 'draft') fail('This bill has already been sent.', 409);
       if (req.body.version !== row.version) fail('This bill changed. Reopen it before sending.', 409);
       const bill = validateBill(row.data), result = calculate(bill);
+      await checkOuting(bill.outingId,req.user.id,bill.participants);
       if (!result.complete) fail('Assign every item, make payer contributions match the total, and resolve calculation differences before sending.');
       for (const receiver of new Set(result.transfers.map(t => t.creditorId))) {
         const payer = await getUser(receiver);

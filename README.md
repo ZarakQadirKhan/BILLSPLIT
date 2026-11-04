@@ -118,6 +118,16 @@ A successful full or partial repayment report shows falling dollar bills and a t
 
 The user-supplied `public/audio/paisa.m4a` clip plays from its beginning for eight seconds. The start and duration are configured in `src/celebration-audio.js`; playback is capped at eight seconds. Audio is prepared during the payment-button gesture for mobile browsers, with mute and manual-play controls. No music subscription or external audio service is used.
 
+## Shared outings and repeating bills
+
+Open **Outings & trips** from Home or Your bills, choose **New outing**, name it and select the full group. Any member can add expenses; each bill can include a subset of the group. Everyone in the outing can see its published bills and original shares. Drafts remain visible only to their creator and are excluded from spending and repayment totals. Group membership is selected at creation; the creator can rename the outing.
+
+The outing screen shows total published spending, each person's original contributions and consumption, your remaining repayments, and amounts awaiting confirmation separately. It uses the existing per-bill debts, without netting opposite debts or creating duplicate repayments. Repayment reporting from the outing groups only its own bills. Pending reports open the bill for review, preserving the existing full-report confirmation process, including reports that span outings.
+
+Use **Add existing bill**, or **Add to an outing** on a bill, to organize an expense you created. Everyone on the bill must belong to the outing. Moving or detaching a bill requires its current version and leaves amounts and repayment history unchanged. Outing membership and bill access are checked on the server, including invitation claims.
+
+**Do this again** on a bill opens a fresh editable draft with the same participants, items, assignments, prices, discount/tax settings and original payer arrangement. It uses today's date and new item/draft identities. The previous outing, receipt reconciliation, manual reconciliation adjustment and all payment history are cleared. Review the amount and payer before sending; no new debts or notifications exist until publication.
+
 ## Manual bills and multiple original payers
 
 Choose **Manual bill** on the home screen (or **Enter manually** in the editor), add items and prices, then assign items as usual. Discounts, tax and the final amount remain editable.

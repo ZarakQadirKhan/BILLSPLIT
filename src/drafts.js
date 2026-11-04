@@ -5,7 +5,7 @@ const pick=(source,keys)=>Object.fromEntries(keys.filter(k=>source[k]!==undefine
 // Allowlist bill data. Photos, OCR text, model transcripts, credentials and blobs
 // must never enter browser draft storage, even if supplied as extra properties.
 export function draftSnapshot(bill) {
-  const data=pick(bill,['id','version','creatorId','status','title','date','paidBy','participants','kind','fareCents','entryMode','deliveryCents','serviceCents','tipCents','adjustmentCents','adjustmentReason','chargeSplit','receiptTotalCents']);
+  const data=pick(bill,['id','version','creatorId','status','title','date','paidBy','participants','kind','fareCents','entryMode','deliveryCents','serviceCents','tipCents','adjustmentCents','adjustmentReason','chargeSplit','receiptTotalCents','outingId','_repeatTitle']);
   data.items=(bill.items||[]).map(i=>({...pick(i,['id','name','quantity','unitPriceCents','lineTotalCents','eligible','uncertain','priceMissing']),allocations:(i.allocations||[]).map(a=>pick(a,['personId','quantity']))}));
   data.discount=pick(bill.discount||{},['type','rate','amountCents','eligibleCapCents','maxDiscountCents']);
   data.tax=pick(bill.tax||{},['type','rate','amountCents','basis']);

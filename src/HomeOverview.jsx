@@ -33,7 +33,7 @@ export default function HomeOverview({ debts, repayments=[], user, person, bills
   </div>;
 }
 
-function GroupedBalances({debts,user,person,bills,filter,onOpen,onPaid}) {
+export function GroupedBalances({debts,user,person,bills,filter,onOpen,onPaid}) {
   const incoming=filter==='owed',groups=new Map();
   for(const d of debts) {
     if(d[incoming?'creditor_id':'debtor_id']!==user.id||!payableAmount(d)) continue;

@@ -10,6 +10,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
   Object.assign(globalThis, { window:dom.window, document:dom.window.document, HTMLElement:dom.window.HTMLElement, localStorage:dom.window.localStorage, location:dom.window.location, history:dom.window.history, IS_REACT_ACT_ENVIRONMENT:true });
   Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
   dom.window.HTMLDialogElement.prototype.showModal = function(){ this.open = true; };
+  dom.window.scrollTo=()=>{};
   const vite = await createServer({ server:{middlewareMode:true,hmr:false}, appType:'custom' });
   const { render, screen, fireEvent, cleanup, act } = await import('@testing-library/react');
   try {
@@ -240,6 +241,49 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
 
     // Verify the onboarding and dashboard use the real profile response.
     const { default:App, BalanceList } = await vite.ssrLoadModule('/src/App.jsx');
+    // Create a shared outing, attach an existing expense, start a grouped ride,
+    // and repeat the old ride as a separate draft without issuing new debts.
+    const outingFetch=globalThis.fetch;
+    const oldRide={...newRideBill('ali'),id:'old-ride',version:2,status:'published',creatorId:'ali',title:'Old ride',date:'2020-01-01',fareCents:120000,participants:['ali','sara']};
+    const outingState={user,people:[user,sara],outings:[],bills:[oldRide],debts:[{id:'ride-debt',bill_id:'old-ride',debtor_id:'sara',creditor_id:'ali',amount:60000,status:'assigned'}],repayments:[],events:[]};
+    let repeated=0;
+    localStorage.setItem('tab-together-session','synthetic-outing');
+    globalThis.fetch=async(url,options={})=>{
+      const path=String(url),body=options.body&&JSON.parse(options.body);
+      if(path.endsWith('/state'))return {ok:true,json:async()=>structuredClone(outingState)};
+      if(path.endsWith('/outings')){assert.deepEqual(body.members,['ali','sara']);const outing={...body,id:'outing-one',creatorId:'ali',version:1};outingState.outings.push(outing);return {ok:true,json:async()=>outing};}
+      if(path.endsWith('/bills/old-ride/outing')){assert.equal(body.outingId,'outing-one');oldRide.outingId=body.outingId;oldRide.version++;return {ok:true,json:async()=>oldRide};}
+      if(path.endsWith('/bills')){repeated++;assert.equal(body.bill.id,undefined);assert.equal(body.bill.outingId,null);assert.equal(body.bill.fareCents,90000);assert.equal(body.bill.date,newBill('ali').date);assert.deepEqual(body.bill.participants,['ali','sara']);const saved={...body.bill,id:'new-ride',version:1,creatorId:'ali',status:'draft'};outingState.bills.push(saved);return {ok:true,json:async()=>saved};}
+      assert.fail(`Unexpected outing request: ${path}`);
+    };
+    try {
+      render(React.createElement(App));await act(async()=>{});
+      fireEvent.click(screen.getByRole('button',{name:/Outings & trips/}));
+      fireEvent.click(screen.getByRole('button',{name:'Plan an outing'}));
+      fireEvent.change(screen.getByLabelText('Outing name'),{target:{value:'Saturday night'}});
+      fireEvent.click(screen.getByRole('button',{name:'Sara',exact:true}));
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Create outing'})));
+      assert.ok(screen.getByRole('heading',{name:'Saturday night.'}));
+      fireEvent.click(screen.getByRole('button',{name:'Add existing bill'}));
+      fireEvent.change(screen.getByLabelText('Existing bill'),{target:{value:'old-ride'}});
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Add to outing',exact:true})));
+      assert.ok(screen.getByText('1 published bills · Drafts excluded'));
+      fireEvent.click(screen.getByRole('button',{name:'Add expense'}));
+      fireEvent.click(screen.getByRole('button',{name:/inDrive ride.*Choose the passengers/}));
+      assert.equal(screen.getByLabelText('Outing or trip (optional)').value,'outing-one');
+      assert.equal(screen.getByLabelText('Total ride fare').value,'0');
+      assert.ok(screen.getByText('Split equally · 2 people'));
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Back to your space'})));
+      fireEvent.click(screen.getByRole('button',{name:/Old ride.*1 Jan/}));
+      fireEvent.click(screen.getByRole('button',{name:'Do this again'}));
+      assert.ok(screen.getByText(/New draft based on “Old ride”/));
+      assert.equal(screen.getByLabelText('Outing or trip (optional)').value,'');
+      assert.equal(screen.getByLabelText('Total ride fare').value,'1200');
+      fireEvent.change(screen.getByLabelText('Total ride fare'),{target:{value:'900'}});
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Save as draft'})));
+      assert.equal(repeated,1);assert.equal(outingState.debts.length,1);assert.equal(oldRide.fareCents,120000);
+      assert.ok(screen.getByText('This draft is only visible to you. Shares have not been sent.'));
+    }finally{cleanup();globalThis.fetch=outingFetch;localStorage.clear();}
     // Celebrate only a successfully reported payment; never confirm it implicitly.
     const originalFetch=globalThis.fetch;
     const liveDebt={id:'party',bill_id:'party-bill',debtor_id:'ali',creditor_id:'sara',amount:120000,status:'assigned'};

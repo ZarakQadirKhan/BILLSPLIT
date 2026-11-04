@@ -7,4 +7,5 @@ import './rides.css';
 import './simple.css';
 import './friends-theme.css';
 import './celebration.css';
+import './outings.css';
 createRoot(document.getElementById('root')).render(<App />);

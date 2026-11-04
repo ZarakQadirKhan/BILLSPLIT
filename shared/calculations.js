@@ -126,6 +126,7 @@ export function validateBill(bill) {
   if (bill.kind === 'ride' && !cents(bill.fareCents)) throw Error('Enter a valid ride fare.');
   bill = normalizeBill(bill);
   if (!str(bill.title, 120) || !bill.title.trim()) throw Error('Give your bill a name.');
+  if (bill.outingId != null && (!str(bill.outingId, 100) || !bill.outingId)) throw Error('Choose a valid outing.');
   if (!str(bill.date, 10) || !/^\d{4}-\d{2}-\d{2}$/.test(bill.date)) throw Error('Enter a valid date.');
   if (!Array.isArray(bill.participants) || !bill.participants.length || bill.participants.length > 50 || new Set(bill.participants).size !== bill.participants.length) throw Error('Choose 1–50 unique participants.');
   if (bill.participants.some(person => !str(person, 100) || !person) || !str(bill.paidBy, 100)) throw Error('Choose valid participants.');
@@ -158,6 +159,7 @@ export function validateBill(bill) {
   // Only persist the reviewed bill fields, never client metadata or image blobs.
   const stored = Object.fromEntries(Object.keys(newBill(bill.paidBy)).map(key => [key, bill[key]]));
   stored.kind = bill.kind || 'food';
+  stored.outingId = bill.outingId ?? null;
   if(bill.receiptReview) stored.receiptReview=validateReceiptReview(bill.receiptReview);
   if (Array.isArray(bill.payments)) stored.payments = bill.payments.map(({ personId, amountCents }) => ({ personId, amountCents }));
   stored.receiptId = null;

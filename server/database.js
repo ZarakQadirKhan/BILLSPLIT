@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { MongoClient } from 'mongodb';
 
-export const collections = ['users', 'sessions', 'contacts', 'invitations', 'bills', 'debts', 'repayments', 'events', 'rate_limits', 'email_outbox', 'ai_budget', 'ai_usage'];
+export const collections = ['users', 'sessions', 'contacts', 'invitations', 'outings', 'bills', 'debts', 'repayments', 'events', 'rate_limits', 'email_outbox', 'ai_budget', 'ai_usage'];
 
 export async function openDatabase(_directory, options = {}) {
   const uri = options.uri ?? process.env.MONGODB_URI;
@@ -18,6 +18,8 @@ export async function openDatabase(_directory, options = {}) {
     await mongo.collection('invitations').createIndex({ person_id: 1 }, { unique: true });
     await mongo.collection('bills').createIndex({ creator_id: 1, created_at: -1 });
     await mongo.collection('bills').createIndex({ participants: 1, status: 1 });
+    await mongo.collection('outings').createIndex({ members: 1, createdAt: -1 });
+    await mongo.collection('bills').createIndex({ 'data.outingId': 1, status: 1 });
     await mongo.collection('debts').createIndex({ bill_id: 1, debtor_id: 1, creditor_id: 1 }, { unique: true });
     // Replace only the legacy uniqueness constraint, after installing its successor.
     // No debt documents change; old bills continue to have their original creditor.

@@ -26,6 +26,7 @@ import { PayerPicker, TransferSummary, receiversReady } from "./Payers.jsx";
 import { assignedQuantity, equalAllocations } from "../shared/allocations.js";
 import { useDraftAutosave } from './drafts.js';
 import ReceiptQuestions from './ReceiptQuestions.jsx';
+import {OutingPicker} from './Outings.jsx';
 
 export default function BillEditor({
   initial,
@@ -36,6 +37,7 @@ export default function BillEditor({
   onClose,
   onSaved,
   notify,
+  outings = [],
 }) {
   const [bill, setBill] = useState(() => structuredClone(initial)),
     [step, setStep] = useState("review"),
@@ -271,6 +273,8 @@ export default function BillEditor({
         </button>
       </div>
       <p className="draft-save-status" role="status">{autosave.message}. Photos are not saved.</p>
+      {bill._repeatTitle&&<p className="notice repeat-notice">New draft based on “{bill._repeatTitle}”. Review today’s prices, people and who paid before sending.</p>}
+      <OutingPicker value={bill.outingId} outings={outings} participants={bill.participants} onChange={outingId=>change({outingId})}/>
       <div className="editor-steps">
         <button
           className={step === "review" ? "active" : ""}

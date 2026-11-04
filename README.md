@@ -143,3 +143,11 @@ node --env-file=<private-env-file> scripts/test-receipt.mjs <receipt.jpg> --conf
 ```
 
 This outputs the temporary transcription, validated items and token-cost estimate. It never creates a bill, sends an email or persists the photo/table. It consumes configured OpenAI credit and records numeric usage in the same cumulative app budget. Do not reset the budget for testing.
+
+## Simpler bill review and in-app friends
+
+New bills use today's local date (editable) and a name supplied by the user. Scanning does not overwrite either. Enter tax as an amount or percentage, including zero: there is no card/cash choice. Scans start with zero tax and calculate the final total from reviewed items, discounts, entered tax and fees. The final receipt amount remains an optional cross-check, not a required scanner result. Missing item prices must still be resolved. Legacy receipt choice metadata no longer blocks sending.
+
+Receiving repayments requires a joined account, but saving bank/wallet/transfer details is optional. Email verification is only needed for email notifications, not publishing bills.
+
+**Friends → Add a friend** lists joined members (names and usernames only) and filters as you type. Send, accept, decline and cancel requests inside the app; pending requests appear in Friends and the inbox and refresh with app state. Acceptance creates mutual contacts. Old invitation links remain supported for previously created placeholders so their existing bill history can still be claimed; new friend discovery uses in-app requests.

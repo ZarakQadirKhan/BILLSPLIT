@@ -35,6 +35,6 @@ export function parseReceipt(text) {
     items.push({ id: id(), name, quantity, unitPriceCents, lineTotalCents: lineTotal === Math.round(quantity * unitPriceCents) ? null : lineTotal, eligible: true, allocations: [], uncertain });
   }
   if (!items.length) warnings.push('No food items were recognized. Add them manually or try a clearer photo.');
-  if (receiptTotalCents == null) warnings.push('No final total found. Enter the amount charged from the receipt.');
+  if (receiptTotalCents == null) warnings.push('No final total found. Review the items and enter tax; we’ll calculate the total.');
   return { title, items, charges, receiptTotalCents, warnings };
 }

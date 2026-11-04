@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { MongoClient } from 'mongodb';
 
-export const collections = ['users', 'sessions', 'contacts', 'invitations', 'outings', 'bills', 'debts', 'repayments', 'events', 'rate_limits', 'email_outbox', 'ai_budget', 'ai_usage'];
+export const collections = ['users', 'sessions', 'contacts', 'friend_requests', 'invitations', 'outings', 'bills', 'debts', 'repayments', 'events', 'rate_limits', 'email_outbox', 'ai_budget', 'ai_usage'];
 
 export async function openDatabase(_directory, options = {}) {
   const uri = options.uri ?? process.env.MONGODB_URI;
@@ -15,6 +15,8 @@ export async function openDatabase(_directory, options = {}) {
     await mongo.collection('users').createIndex({ username: 1 }, { unique: true, partialFilterExpression: { username: { $type: 'string' } } });
     await mongo.collection('users').createIndex({ recovery_hash: 1 }, { unique: true, partialFilterExpression: { recovery_hash: { $type: 'string' } } });
     await mongo.collection('contacts').createIndex({ owner_id: 1, person_id: 1 }, { unique: true });
+    await mongo.collection('friend_requests').createIndex({ recipient_id: 1, status: 1 });
+    await mongo.collection('friend_requests').createIndex({ sender_id: 1, status: 1 });
     await mongo.collection('invitations').createIndex({ person_id: 1 }, { unique: true });
     await mongo.collection('bills').createIndex({ creator_id: 1, created_at: -1 });
     await mongo.collection('bills').createIndex({ participants: 1, status: 1 });

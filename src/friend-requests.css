@@ -1,0 +1,9 @@
+.friend-requests { margin-bottom: 18px; }
+.friend-directory-row, .friend-request-row { display: flex; align-items: center; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--border, #e9e5ee); flex-wrap: wrap; }
+.friend-request-person { flex: 1; min-width: 90px; overflow-wrap: anywhere; }
+.friend-request-person strong, .friend-request-person small { display: block; }
+.friend-request-person small { margin-top: 4px; color: var(--muted, #726c80); }
+.friend-request-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.friend-directory-row .button, .friend-request-actions .button { min-height: 44px; }
+.friend-directory-row .badge { white-space: normal; }
+@media (max-width: 480px) { .friend-request-actions { width: 100%; padding-left: 0; } .friend-request-actions .button { flex: 1; } }

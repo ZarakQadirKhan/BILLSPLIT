@@ -389,7 +389,7 @@ export function Profile({ user, emailDelivery, onClose, onSave, onRecovery, onUp
           Email me about bills, payments and daily reminders
         </label>
         <label>
-          Where should friends pay you?
+          Where should friends pay you? (optional)
           <textarea
             placeholder={
               "Account title: Ali Khan\nBank / JazzCash / EasyPaisa\nIBAN or account number\nAny transfer instructions"

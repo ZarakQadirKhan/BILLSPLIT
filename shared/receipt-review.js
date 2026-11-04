@@ -1,8 +1,5 @@
 export function receiptReviewErrors(bill) {
   const errors=[];
-  const review=bill.receiptReview;
-  if(review?.options?.length && review.selectedOption==null) errors.push('Choose the card or cash option, or enter your own tax.');
-  if(review?.needsTotal && bill.receiptTotalCents==null) errors.push('Enter the final amount actually charged.');
   for(const item of bill.items||[]) if(item.priceMissing) errors.push(`Enter the price for ${item.name || 'this item'}, or confirm it was free.`);
   return errors;
 }
@@ -18,10 +15,4 @@ export function validateReceiptReview(review) {
     return {label:o.label,taxCents:o.taxCents,taxRate:o.taxRate,taxBasis:o.taxBasis,receiptTotalCents:o.receiptTotalCents};
   });
   return {needsTotal:review.needsTotal,selectedOption:review.selectedOption,options};
-}
-
-export function chooseReceiptOption(bill,index) {
-  if(index==='manual') return {...bill,receiptReview:{...bill.receiptReview,selectedOption:'manual'}};
-  const option=bill.receiptReview.options[index];
-  return {...bill,tax:{type:option.taxCents!=null?'fixed':'percent',amountCents:option.taxCents??0,rate:option.taxRate??0,basis:option.taxBasis||'after'},receiptTotalCents:option.receiptTotalCents,receiptReview:{...bill.receiptReview,selectedOption:index,needsTotal:true}};
 }

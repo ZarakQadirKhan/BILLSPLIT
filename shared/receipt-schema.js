@@ -109,7 +109,7 @@ export function normalizeReceipt(value) {
   });
   if (value.receiptTotalCents == null)
     warnings.push(
-      "No final total found. Enter the amount charged from the receipt.",
+      "No final total found. Review the items and enter tax; we’ll calculate the total.",
     );
   if (
     value.charges.taxCents == null &&

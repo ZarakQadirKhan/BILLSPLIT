@@ -2,20 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizeReceipt} from '../shared/receipt-schema.js';
 import {calculate,newBill,validateBill} from '../shared/calculations.js';
-import {chooseReceiptOption} from '../shared/receipt-review.js';
 import {extractReceipt} from '../src/receipt-scan.js';
 
 const options=[{label:'Card',taxCents:80575,taxRate:5,taxBasis:null,receiptTotalCents:null},{label:'Cash',taxCents:257840,taxRate:16,taxBasis:null,receiptTotalCents:1869340}];
-test('unresolved receipt choices survive storage, block publishing, and recalculate on selection',()=>{
+test('legacy payment options do not block manual tax or a calculated total; missing prices still do',()=>{
   const bill={...newBill('a'),title:'Dinner',items:[{id:'food',name:'Food',quantity:1,unitPriceCents:1611500,allocations:[{personId:'a',quantity:1}]}],receiptReview:{options,needsTotal:true,selectedOption:null}};
-  assert.equal(calculate(bill).complete,false);assert.equal(calculate(bill).errors.length,2);
+  assert.equal(calculate(bill).complete,true);assert.equal(calculate(bill).errors.length,0);
   const stored=validateBill({...bill,receiptReview:{...bill.receiptReview,photo:'SECRET',options:options.map(o=>({...o,photo:'SECRET'}))}});
   assert.ok(!JSON.stringify(stored).includes('SECRET'));
   assert.deepEqual(stored.receiptReview,bill.receiptReview);
-  const card=chooseReceiptOption(stored,0);assert.equal(calculate(card).total,1692075);assert.equal(calculate(card).complete,false,'clipped total still requires actual charged amount');
-  card.receiptTotalCents=1692075;assert.equal(calculate(card).complete,true);
-  const cash=chooseReceiptOption(stored,1);assert.equal(calculate(cash).total,1869340);assert.equal(calculate(cash).complete,true);
-  const manual=chooseReceiptOption(stored,'manual');assert.equal(calculate(manual).complete,false);manual.receiptTotalCents=1611500;assert.equal(calculate(manual).complete,true);
+  stored.tax.amountCents=80575;assert.equal(calculate(stored).total,1692075);assert.equal(calculate(stored).complete,true);
+  stored.tax.amountCents=0;assert.equal(calculate(stored).total,1611500);assert.equal(calculate(stored).complete,true);
+  stored.tax={type:'percent',rate:16,amountCents:0,basis:'after'};assert.equal(calculate(stored).total,1869340);
+  stored.receiptTotalCents=1692075;assert.equal(calculate(stored).complete,false,'an explicitly entered receipt check still catches mismatches');
+  stored.receiptTotalCents=null;
   stored.items[0].priceMissing=true;assert.equal(calculate({...stored,receiptReview:null}).complete,false);
   assert.equal(validateBill(stored).items[0].priceMissing,true);
   assert.throws(()=>validateBill({...stored,receiptReview:{...stored.receiptReview,selectedOption:90}}));

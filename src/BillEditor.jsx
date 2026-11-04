@@ -59,6 +59,8 @@ export default function BillEditor({
     consentResolver = useRef(),
     result = calculate(bill),
     participants = people.filter((p) => bill.participants.includes(p.id));
+  let validationError = "";
+  try { validateBill(bill); } catch (e) { validationError = e.message; }
   const change = (patch) => setBill((current) => ({ ...current, ...patch }));
   const finishConsent = (choice) => {
     setAwaitingConsent(false);
@@ -90,10 +92,10 @@ export default function BillEditor({
     setWarnings(parsed.warnings);
     setBill((current) => ({
       ...current,
-      title: current.title || parsed.title,
+      title: current.title,
       items: parsed.items,
-      receiptTotalCents: parsed.receiptTotalCents,
-      receiptReview:{options:parsed.paymentOptions||[],selectedOption:null,needsTotal:parsed.receiptTotalCents==null},
+      receiptTotalCents: null,
+      receiptReview: {options: [], selectedOption: "manual", needsTotal: false},
       discount: {
         ...current.discount,
         type:
@@ -107,18 +109,7 @@ export default function BillEditor({
         eligibleCapCents: charges.eligibleCapCents ?? null,
         maxDiscountCents: charges.maxDiscountCents ?? null,
       },
-      tax: {
-        ...current.tax,
-        type:
-          charges.taxCents != null
-            ? "fixed"
-            : charges.taxRate != null
-              ? "percent"
-              : "fixed",
-        amountCents: charges.taxCents || 0,
-        rate: charges.taxRate || 0,
-        basis: charges.taxBasis || "after",
-      },
+      tax: {type: "fixed", amountCents: 0, rate: 0, basis: "after"},
       deliveryCents: charges.deliveryCents || 0,
       serviceCents: charges.serviceCents || 0,
       tipCents: charges.tipCents || 0,
@@ -687,19 +678,9 @@ export default function BillEditor({
                   </div>
                 )}
               </details>
-              <details
-                className="card optional-fields"
-                key={"tax-" + Boolean(result.tax || result.fees)}
-                open={Boolean(result.tax || result.fees) || undefined}
-              >
-                <summary>
-                  Tax, fees & rounding{" "}
-                  <span>
-                    {result.tax || result.fees
-                      ? money(result.tax + result.fees)
-                      : "Add only if needed"}
-                  </span>
-                </summary>
+              <section className="card">
+                <h2>Tax & extra charges</h2>
+                <p className="muted">Enter the tax charged, or leave it at 0. Your final total updates automatically.</p>
                 <div className="form-grid">
                   <label>
                     Tax type
@@ -821,7 +802,7 @@ export default function BillEditor({
                     </label>
                   </div>
                 </details>
-              </details>
+              </section>
             </>
           ) : (
             <>
@@ -1039,6 +1020,7 @@ export default function BillEditor({
                 <TransferSummary result={result} people={people}/>
               </>
             )}
+            {validationError && <p className="inline-error">{validationError}</p>}
             {result.errors.map((e, i) => (
               <p key={i} className="inline-error">
                 {e}
@@ -1058,7 +1040,7 @@ export default function BillEditor({
                   className="button primary full"
                   onClick={() => save(true)}
                   disabled={
-                    !result.complete ||
+                    !!validationError || !result.complete ||
                     !receiversReady(result, people) ||
                     busy ||
                     !!progress
@@ -1114,7 +1096,7 @@ export default function BillEditor({
           <button
             className="button primary"
             disabled={
-              !result.complete ||
+              !!validationError || !result.complete ||
               !receiversReady(result, people) ||
               busy ||
               !!progress

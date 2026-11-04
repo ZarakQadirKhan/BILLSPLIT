@@ -56,6 +56,7 @@ import PaymentCelebration from './PaymentCelebration.jsx';
 import {createCelebrationAudio} from './celebration-audio.js';
 import {CreateOuting,MoveBillOuting,AddExistingBill,OutingList,OutingDetails} from './Outings.jsx';
 import {repeatBill} from './repeat-bill.js';
+import FindFriends, {FriendRequests} from './FriendRequests.jsx';
 
 export default function App() {
   const [outingId,setOutingId]=useState(null),[billSection,setBillSection]=useState('bills');
@@ -166,7 +167,7 @@ export default function App() {
   const startBill = () => setModal({ type: "billType",outingId:outing?.id });
   const startSelectedBill = (kind) => {
     const group=outings.find(o=>o.id===modal?.outingId);
-    const fresh=kind === "ride" ? newRideBill(user.id) : { ...newBill(user.id), entryMode: kind === "manual" ? "manual" : "scan" };
+    const fresh=kind === "ride" ? {...newRideBill(user.id),title:""} : { ...newBill(user.id), entryMode: kind === "manual" ? "manual" : "scan" };
     setEditor({...fresh,...(group?{outingId:group.id,participants:[...group.members]}:{})});
     setDetailId(null);
     setModal(null);
@@ -255,15 +256,6 @@ export default function App() {
     setModal({
       type: "invite",
       name: friend.name,
-      url: `${location.origin}/#join=${data.inviteToken}`,
-    });
-  };
-  const addFriend = async (name) => {
-    const data = await request("/friends", { method: "POST", body: { name } });
-    await refresh();
-    setModal({
-      type: "invite",
-      name: data.person.name,
       url: `${location.origin}/#join=${data.inviteToken}`,
     });
   };
@@ -537,7 +529,7 @@ export default function App() {
                       : view === "bills"
                         ? "Every meal, every share, every settlement."
                         : view === "friends"
-                          ? "Your people. Invite them once, split whenever."
+                          ? "Your people. Send a request, then split together."
                           : "New shares, payment updates, and confirmations."}
                   </p>
                 </div>
@@ -613,6 +605,8 @@ export default function App() {
                 </section>
               )}
               {view === "friends" && (
+                <>
+                <FriendRequests requests={state.friendRequests} userId={user.id} onChanged={refresh}/>
                 <div className="friends-grid">
                   {people
                     .filter((p) => p.id !== user.id)
@@ -673,9 +667,10 @@ export default function App() {
                       <Plus size={25} />
                     </span>
                     <h3>Bring a friend</h3>
-                    <p>Add a name and share their invitation.</p>
+                    <p>Find your friends and send a request.</p>
                   </button>
                 </div>
+                </>
               )}
               {view === "activity" && (
                 <section className="card">
@@ -693,12 +688,13 @@ export default function App() {
                       <CheckCheck size={17} /> Mark all read
                     </button>
                   </div>
+                  <FriendRequests requests={state.friendRequests} userId={user.id} onChanged={refresh}/>
                   {state.events.length ? (
                     state.events.map((e) => (
                       <button
                         key={e.id}
                         className={`activity-row ${!e.is_read ? "unread" : ""}`}
-                        onClick={() => e.bill_id && setDetailId(e.bill_id)}
+                        onClick={() => e.friend_request_id ? navigate("friends") : e.bill_id && setDetailId(e.bill_id)}
                       >
                         <span className="activity-icon">
                           <Bell size={18} />
@@ -720,8 +716,7 @@ export default function App() {
                     />
                   )}
                   <p className="footnote">
-                    Updates refresh while the app is open. No SMS, email, or
-                    background push notifications.
+                    Updates refresh while the app is open. Friend requests are accepted here or in Friends.
                   </p>
                 </section>
               )}
@@ -794,13 +789,7 @@ export default function App() {
         />
       )}
       {modal?.type === "addFriend" && (
-        <NameModal
-          title="Bring a friend"
-          label="Your friend’s name"
-          button="Create invitation"
-          onClose={() => setModal(null)}
-          onSubmit={addFriend}
-        />
+        <FindFriends requests={state.friendRequests} userId={user.id} onChanged={refresh} onClose={() => setModal(null)}/>
       )}
       {modal?.type === "invite" && (
         <Modal title={`Invite ${modal.name}`} onClose={() => setModal(null)}>

@@ -5,7 +5,7 @@ import { MoneyInput } from './ui.jsx';
 
 export const receiversReady = (result, people) => result.transfers.every(t => {
   const p = people.find(p => p.id === t.creditorId);
-  return p?.claimed && !!p.paymentDetails?.trim();
+  return !!p?.claimed;
 });
 
 export function PayerPicker({ bill, result, people, change, onProfile }) {
@@ -29,7 +29,7 @@ export function PayerPicker({ bill, result, people, change, onProfile }) {
       <p className={result.paymentDifference ? 'notice' : 'footnote'} role="status">{result.paymentDifference > 0 ? `${money(result.paymentDifference)} still to account for` : result.paymentDifference < 0 ? `${money(-result.paymentDifference)} more than the bill total` : 'Contributions match the bill total.'}</p>
     </>}
     <small>Each person’s own share is deducted from what they paid. We calculate the remaining transfers.</small>
-    {!receiversReady(result, people) && <p className="notice">Everyone receiving money needs to join and add transfer details. <button className="text-button" onClick={onProfile}>Your payment details</button></p>}
+    {!receiversReady(result, people) && <p className="notice">Everyone receiving money needs to join the app first. Payment details are optional.</p>}
   </div>;
 }
 

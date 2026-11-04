@@ -9,6 +9,7 @@ import { createReceiptPipeline } from './openai-receipt.js';
 import { createRepaymentService } from './repayments.js';
 import { payableAmount } from '../shared/payments.js';
 import { queueDailyReminders, validCronSecret } from './reminders.js';
+import { mountFriends, pendingFriendRequests } from './friends.js';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -154,6 +155,7 @@ export async function createApi(dataDirectory, options = {}) {
     res.json({ token: await issueSession(user.id), user: selfUser(user) });
   });
   api.use(requireUser);
+  mountFriends(api, db, link);
   api.post('/scan-receipt', (req, res, next) => {
     if (!['gemini', 'openai-gemini'].includes(req.get('x-receipt-consent'))) return res.status(400).json({ error: 'Choose AI scanning and confirm the privacy notice first.' });
     next();
@@ -173,6 +175,7 @@ export async function createApi(dataDirectory, options = {}) {
       const outings=await db.many('outings',{members:userId},{sort:{createdAt:-1}});
       const rows = await db.many('bills', { $or: [{ creator_id: userId }, { participants: userId, status: 'published' }, {'data.outingId':{$in:outings.map(o=>o.id)},status:'published'}] }, { sort: { created_at: -1 } });
       const contacts = await db.many('contacts', { owner_id: userId });
+      const friendRequests = await pendingFriendRequests(db, userId);
       const visible = new Set([userId, ...contacts.map(row => row.person_id)]);
       for (const row of rows) { visible.add(row.creator_id); for (const p of row.participants) visible.add(p); }
       for(const outing of outings)for(const id of outing.members)visible.add(id);
@@ -181,7 +184,7 @@ export async function createApi(dataDirectory, options = {}) {
       const repayments = await db.many('repayments', { $or: [{ debtor_id: userId }, { creditor_id: userId }] }, { sort: { created_at: -1 } });
       const events = await db.many('events', { user_id: userId }, { sort: { created_at: -1 }, limit: 200 });
       const emailQueue = await db.many('email_outbox', { user_id: userId, status: { $in: ['pending', 'sending', 'failed'] } }, { projection: { _id: 0, status: 1, last_error: 1 }, sort: { created_at: -1 } });
-      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), outings, bills: rows.map(billResult), debts: debts.map(debtResult), repayments, events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
+      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), friendRequests, outings, bills: rows.map(billResult), debts: debts.map(debtResult), repayments, events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
     });
     res.json(state);
   });
@@ -323,7 +326,7 @@ export async function createApi(dataDirectory, options = {}) {
       if (!result.complete) fail('Assign every item, make payer contributions match the total, and resolve calculation differences before sending.');
       for (const receiver of new Set(result.transfers.map(t => t.creditorId))) {
         const payer = await getUser(receiver);
-        if (!payer?.claimed || !payer.payment_details.trim()) fail('Everyone receiving repayments needs to join and save payment details first.');
+        if (!payer?.claimed) fail('Everyone receiving repayments needs to join the app first. Payment details are optional.');
       }
       await db.update('bills', { id: row.id }, { $set: { status: 'published' }, $inc: { version: 1 } });
       for (const transfer of result.transfers) await db.insert('debts', { id: randomUUID(), bill_id: row.id, debtor_id: transfer.debtorId, creditor_id: transfer.creditorId, amount: transfer.amount, status: 'assigned', reference: '', note: '', updated_at: now() });

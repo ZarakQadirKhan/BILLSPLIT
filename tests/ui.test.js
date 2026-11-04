@@ -15,7 +15,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
   const { render, screen, fireEvent, cleanup, act } = await import('@testing-library/react');
   try {
     const { default:BillEditor } = await vite.ssrLoadModule('/src/BillEditor.jsx');
-    const user = { id:'ali',name:'Ali',claimed:true,paymentDetails:'TEST account' }, sara = { id:'sara',name:'Sara',claimed:true,paymentDetails:'' };
+    const user = { id:'ali',name:'Ali',claimed:true,paymentDetails:'' }, sara = { id:'sara',name:'Sara',claimed:true,paymentDetails:'' };
     const bill = newBill('ali'); bill.title='Dinner'; bill.participants=['ali','sara']; bill.items=[{id:'food',name:'Dinner plates',quantity:2,unitPriceCents:1500000,eligible:true,allocations:[]}]; bill.discount={...bill.discount,type:'percent',rate:50,eligibleCapCents:2000000}; bill.receiptTotalCents=2000000;
     render(React.createElement(BillEditor,{initial:bill,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
     assert.ok(screen.getByText(/10,000.00 saved/));
@@ -94,7 +94,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     dom.window.HTMLCanvasElement.prototype.toBlob=callback=>callback(new Blob(['synthetic'],{type:'image/jpeg'}));
     globalThis.fetch=async()=>({ok:true,json:async()=>({source:'gemini',receipt:{title:'Scanned dinner',items:[{id:'scan',name:'Dinner',quantity:2,unitPriceCents:1500000,lineTotalCents:3000000,eligible:true,uncertain:false,allocations:[]}],charges:{discountCents:null,discountRate:50,eligibleCapCents:2000000,maxDiscountCents:null,taxCents:10000,taxRate:15,taxBasis:null,deliveryCents:null,serviceCents:null,tipCents:null},receiptTotalCents:2010000,warnings:[]}})});
     try {
-      const scanning=newBill('ali'); scanning.adjustmentCents=5000; scanning.adjustmentReason='Old receipt adjustment';
+      const scanning=newBill('ali'); scanning.title='My dinner'; scanning.date='2026-11-04'; scanning.adjustmentCents=5000; scanning.adjustmentReason='Old receipt adjustment';
       const {container}=render(React.createElement(BillEditor,{initial:scanning,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
       assert.equal(screen.getByLabelText('Keep photo on this device').checked,false);
       await act(async()=>fireEvent.change(container.querySelector('input[type=file]'),{target:{files:[new dom.window.File(['synthetic'],'receipt.jpg',{type:'image/jpeg'})]}}));
@@ -105,7 +105,13 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
       assert.equal(screen.getByLabelText('Item 1 quantity').value,'2');
       assert.equal(screen.getByLabelText('Discount percentage').value,'50');
       assert.equal(screen.getByLabelText('Discount eligible amount limit').value,'20000');
-      assert.ok(screen.getByText('Matches your receipt'),'exact printed tax wins over percentage and old adjustment is cleared');
+      assert.equal(screen.getByLabelText('Tax amount').value,'0');
+      assert.equal(screen.getByLabelText('Final charged amount').value,'');
+      assert.equal(screen.getByLabelText('Bill name').value,'My dinner');
+      assert.equal(screen.getByLabelText('Date').value,'2026-11-04');
+      fireEvent.change(screen.getByLabelText('Tax amount'),{target:{value:'100'}});
+      fireEvent.change(screen.getByLabelText('Final charged amount'),{target:{value:'20100'}});
+      assert.ok(screen.getByText('Matches your receipt'),'user-entered tax updates the calculated total');
       fireEvent.change(screen.getByLabelText('Item 1 name'),{target:{value:'Corrected dinner'}});
       fireEvent.change(screen.getByLabelText('Item 1 quantity'),{target:{value:'3'}});
       fireEvent.change(screen.getByLabelText('Item 1 unit price'),{target:{value:'10000'}});
@@ -126,6 +132,36 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
       if(savedBitmap) globalThis.createImageBitmap=savedBitmap; else delete globalThis.createImageBitmap;
       dom.window.HTMLCanvasElement.prototype.getContext=savedContext; dom.window.HTMLCanvasElement.prototype.toBlob=savedBlob;
     }
+
+    // In-app directory starts with everyone, filters locally, and sends/accepts requests.
+    const {default:FindFriends,FriendRequests}=await vite.ssrLoadModule('/src/FriendRequests.jsx');
+    const directoryFetch=globalThis.fetch;
+    let sentRequest=null,decision=null,friendRefreshes=0;
+    let directory=[{id:'sara',name:'Sara',username:'sara_k',relationship:'none'},{id:'hamza',name:'Hamza',username:'hamza_123',relationship:'none'}];
+    globalThis.fetch=async(url,options={})=>{
+      if(String(url).endsWith('/people'))return {ok:true,json:async()=>({people:structuredClone(directory)})};
+      if(String(url).endsWith('/friend-requests')){sentRequest=JSON.parse(options.body);directory[0].relationship='sent';return {ok:true,json:async()=>({id:'req'})};}
+      if(String(url).endsWith('/friend-requests/incoming/action')){decision=JSON.parse(options.body);return {ok:true,json:async()=>({ok:true})};}
+      assert.fail('Unexpected friend request '+url);
+    };
+    try {
+      render(React.createElement(FindFriends,{requests:[],userId:'ali',onChanged:async()=>{friendRefreshes++;},onClose(){}}));
+      await act(async()=>{});
+      assert.ok(screen.getByRole('button',{name:'Send request to Sara'}));
+      assert.ok(screen.getByRole('button',{name:'Send request to Hamza'}));
+      fireEvent.change(screen.getByLabelText('Search names or usernames'),{target:{value:'@SARA_K'}});
+      assert.equal(screen.queryByRole('button',{name:'Send request to Hamza'}),null);
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Send request to Sara'})));
+      assert.deepEqual(sentRequest,{personId:'sara'});assert.equal(friendRefreshes,1);
+      assert.ok(screen.getByText('Request sent'));
+      fireEvent.change(screen.getByLabelText('Search names or usernames'),{target:{value:'Nobody'}});
+      assert.ok(screen.getByText(/No matching people/));
+      cleanup();
+      const incoming={id:'incoming',sender_id:'sara',recipient_id:'ali',version:3,sender:{name:'Sara',username:'sara_k'}};
+      render(React.createElement(FriendRequests,{requests:[incoming],userId:'ali',onChanged:async()=>{friendRefreshes++;}}));
+      await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Accept Sara'})));
+      assert.deepEqual(decision,{action:'accept',version:3});assert.equal(friendRefreshes,2);
+    }finally{cleanup();globalThis.fetch=directoryFetch;}
 
     const {default:ItemAssignments} = await vite.ssrLoadModule('/src/ItemAssignments.jsx');
     function AssignmentHarness({quantity}) {
@@ -161,7 +197,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.match(screen.getByTestId('ride-to-collect').textContent,/600.00/);
     assert.equal(screen.getByRole('button',{name:'Send ride shares'}).disabled,false);
     fireEvent.change(screen.getByLabelText('Who paid the original bill?'),{target:{value:'sara'}});
-    assert.equal(screen.getByRole('button',{name:'Send ride shares'}).disabled,true,'unconfigured payer is flagged');
+    assert.equal(screen.getByRole('button',{name:'Send ride shares'}).disabled,false,'joined payer needs no payment details');
     fireEvent.click(screen.getByRole('button',{name:/Ali/}));
     assert.match(screen.getByTestId('ride-to-collect').textContent,/0.00/);
     cleanup();
@@ -205,8 +241,19 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     // Explicit receipt questions, including a price that must not vanish mid-entry.
     const choices={...bill,entryMode:'manual',discount:newBill('ali').discount,receiptTotalCents:null,receiptReview:{needsTotal:true,selectedOption:null,options:[{label:'Card',taxCents:150000,taxRate:5,taxBasis:null,receiptTotalCents:3150000},{label:'Cash',taxCents:480000,taxRate:16,taxBasis:null,receiptTotalCents:3480000}]}};
     render(React.createElement(BillEditor,{initial:choices,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
-    fireEvent.click(screen.getByRole('button',{name:/Card.*5% tax/}));assert.equal(screen.getByLabelText('Final charged amount').value,'31500');
-    fireEvent.click(screen.getByRole('button',{name:/Cash.*16% tax/}));assert.equal(screen.getByLabelText('Final charged amount').value,'34800');
+    assert.equal(screen.queryByRole('button',{name:/Card.*5% tax/}),null);
+    assert.equal(screen.queryByText('How was this bill paid?'),null);
+    fireEvent.change(screen.getByLabelText('Tax amount'),{target:{value:'1500'}});
+    assert.equal(screen.getByLabelText('Final charged amount').value,'');
+    fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
+    fireEvent.click(screen.getByRole('button',{name:'Split all items equally'}));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false,'legacy scan choices no longer block sending');
+    fireEvent.click(screen.getByRole('button',{name:'1 Review the bill'}));
+    fireEvent.change(screen.getByLabelText('Tax amount'),{target:{value:'0'}});
+    fireEvent.change(screen.getByLabelText('Bill name'),{target:{value:''}});
+    fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
+    assert.ok(screen.getByText('Give your bill a name.'));
     cleanup();
     const unknown={...choices,receiptReview:null,items:[{...choices.items[0],name:'Pizza',unitPriceCents:0,lineTotalCents:null,priceMissing:true,allocations:[]}]};
     render(React.createElement(BillEditor,{initial:unknown,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));

@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
+import { createApi } from '../server/api.js';
+import { newBill } from '../shared/calculations.js';
+import { payableAmount } from '../shared/payments.js';
+import { reminderBalance, queueDailyReminders, reminderContent } from '../server/reminders.js';
+
+test('rejected repayments restore dues and reminders without resetting scoreboard time or leaking private bills', async t => {
+  const replica=await MongoMemoryReplSet.create({replSet:{count:1}}),sent=[];
+  let clock=new Date('2026-11-05T00:00:00Z');const start=clock.toISOString(),hour=3600000;
+  const tick=h=>clock=new Date(Date.parse(start)+h*hour);
+  const {api,db}=await createApi(undefined,{uri:replica.getUri(),databaseName:'scoreboard_api',clock:()=>clock,mail:{enabled:true,from:'sender@example.test',baseUrl:'https://example.test',transport:{async sendMail(m){sent.push(m);return {messageId:m.messageId};}}}});
+  const app=express();app.use('/api',api);const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+  t.after(async()=>{await new Promise(r=>server.close(r));await db.close();await replica.stop();});
+  const base=`http://127.0.0.1:${server.address().port}/api`;
+  async function call(path,user,body){const r=await fetch(base+path,{method:body?'POST':'GET',headers:{...(user?{Authorization:`Bearer ${user.token}`} :{}),...(body?{'Content-Type':'application/json'}:{})},body:body&&JSON.stringify(body)});return {status:r.status,data:await r.json()};}
+  const users=[];for(const name of ['Ali','Sara','Hamza','Stranger'])users.push((await call('/register',null,{name,username:name.toLowerCase()})).data);
+  const [ali,sara,hamza,stranger]=users;
+  for(const user of [sara,hamza]) await db.insert('contacts',{id:`${ali.user.id}:${user.user.id}`,owner_id:ali.user.id,person_id:user.user.id});
+  for(const user of [ali,sara,hamza])await db.update('users',{id:user.user.id},{$set:{email:`${user.user.username}@example.test`,email_verified:true,email_notifications:true}});
+  const bill={...newBill(ali.user.id),title:'Shared dinner',date:'2020-01-01',participants:[ali.user.id,sara.user.id,hamza.user.id],payments:[{personId:ali.user.id,amountCents:70000},{personId:hamza.user.id,amountCents:50000}],items:[{id:'dish',name:'Dinner',quantity:1,unitPriceCents:120000,allocations:[{personId:sara.user.id,quantity:1}]}]};
+  const draft=(await call('/bills',ali,{bill})).data;
+  const published=await call(`/bills/${draft.id}/publish`,ali,{version:draft.version});assert.equal(published.status,200);assert.equal(published.data.publishedAt,start);
+  const debts=await db.many('debts',{bill_id:draft.id}),toAli=debts.find(d=>d.creditor_id===ali.user.id),toHamza=debts.find(d=>d.creditor_id===hamza.user.id);
+  assert.ok(debts.every(d=>d.assigned_at===start));
+  const report=async(debt,key)=>{const r=await call('/repayments',sara,{debtIds:[debt.id],amountCents:debt.amount,requestId:key,created_at:'2020-01-01'});assert.equal(r.status,201);return r.data;};
+  const decide=(p,user,action)=>call(`/repayments/${encodeURIComponent(p.id)}/action`,user,{action,note:'Transfer not received'});
+  tick(1);const rejected=await report(toAli,'report-rejected');
+  assert.equal((await reminderBalance(db,sara.user.id)).total,50000);
+  tick(2);assert.equal((await decide(rejected,ali,'reject')).status,200);
+  const restored=await db.one('debts',{id:toAli.id});assert.equal(payableAmount(restored),70000);assert.equal(restored.assigned_at,start);assert.ok(restored.last_rejected_at);
+  assert.equal((await reminderBalance(db,sara.user.id)).total,120000);
+  assert.ok(sent.some(m=>m.to==='sara@example.test'&&/not received|not confirm/i.test(m.text)),'rejection email delivered through mock transport');
+  const midnight=new Date('2026-11-05T19:00:00Z');
+  assert.equal((await queueDailyReminders(db,{now:midnight,choose:()=>0})).queued,1,'rejected balance remains eligible for nightly reminders');
+  const reminder=await db.one('email_outbox',{kind:'reminder',user_id:sara.user.id});
+  assert.match((await reminderContent(db,reminder,await db.one('users',{id:sara.user.id}),midnight)).text,/1,200.00/);
+  let scoreboard=(await call('/state',sara)).data.scoreboard.find(r=>r.personId===sara.user.id);
+  assert.equal(scoreboard.averageMs,null);assert.equal(scoreboard.openBills,1);assert.equal(scoreboard.oldestOpenAt,start);
+  tick(3);const goodAli=await report(toAli,'report-ali-good');
+  tick(4);const goodHamza=await report(toHamza,'report-hamza-good');
+  tick(10);assert.equal((await decide(goodHamza,hamza,'confirm')).status,200);
+  assert.equal((await call('/state',sara)).data.scoreboard.find(r=>r.personId===sara.user.id).averageMs,null,'all recipients must confirm');
+  tick(11);assert.equal((await decide(goodAli,ali,'confirm')).status,200);
+  scoreboard=(await call('/state',sara)).data.scoreboard.find(r=>r.personId===sara.user.id);
+  assert.equal(scoreboard.completedBills,1);assert.equal(scoreboard.averageMs,4*hour,'last confirmed report time, not latest approval or first rejected report');assert.equal(scoreboard.openBills,0);
+  assert.equal((await reminderBalance(db,sara.user.id)).total,0);
+  assert.equal(await reminderContent(db,reminder,await db.one('users',{id:sara.user.id}),midnight),null,'queued reminder cancels after confirmed settlement');
+  assert.deepEqual((await call('/state',stranger)).data.scoreboard.map(r=>r.personId),[stranger.user.id]);
+  assert.equal((await call('/state',hamza)).data.repayments.length,1,'scoreboard does not expose another creditor’s repayment records');
+  // Historical assignment events provide a reliable baseline for pre-scoreboard bills.
+  await db.update('bills',{id:draft.id},{$unset:{published_at:''}});
+  await db.updateMany('debts',{bill_id:draft.id},{$unset:{assigned_at:''}});
+  await db.updateMany('events',{bill_id:draft.id,message:'Shared dinner: review your share and repayments.'},{$set:{created_at:start}});
+  assert.equal((await call('/state',sara)).data.scoreboard.find(r=>r.personId===sara.user.id).averageMs,4*hour);
+});

@@ -12,7 +12,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
   dom.window.HTMLDialogElement.prototype.showModal = function(){ this.open = true; };
   dom.window.scrollTo=()=>{};
   const vite = await createServer({ server:{middlewareMode:true,hmr:false}, appType:'custom' });
-  const { render, screen, fireEvent, cleanup, act } = await import('@testing-library/react');
+  const { render, screen, fireEvent, cleanup, act, within } = await import('@testing-library/react');
   try {
     const { default:BillEditor } = await vite.ssrLoadModule('/src/BillEditor.jsx');
     const user = { id:'ali',name:'Ali',claimed:true,paymentDetails:'' }, sara = { id:'sara',name:'Sara',claimed:true,paymentDetails:'' };
@@ -72,6 +72,36 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.equal(screen.queryByLabelText('Payer 2 amount'),null);
     assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
     cleanup();
+
+    // Two identical servings can be shared by different groups, then funded by three payers.
+    const servingPeople=[user,sara,{id:'hamza',name:'Hamza',claimed:true},{id:'usman',name:'Usman',claimed:true},{id:'zain',name:'Zain',claimed:true}];
+    const servingBill={...newBill('ali'),title:'Pasta evening',entryMode:'manual',participants:servingPeople.map(p=>p.id),items:[{id:'pasta',name:'Pasta',quantity:2,unitPriceCents:60000,allocations:[]}]};
+    render(React.createElement(BillEditor,{initial:servingBill,people:servingPeople,user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+    fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
+    fireEvent.click(screen.getByRole('button',{name:'Assign each serving separately'}));
+    const firstServing=within(screen.getByRole('heading',{name:/Pasta · serving 1/}).closest('article'));
+    const secondServing=within(screen.getByRole('heading',{name:/Pasta · serving 2/}).closest('article'));
+    fireEvent.click(firstServing.getByRole('button',{name:'Share Pasta · serving 1'}));
+    fireEvent.click(firstServing.getByRole('button',{name:'You',exact:true}));fireEvent.click(firstServing.getByRole('button',{name:'Sara',exact:true}));
+    fireEvent.click(firstServing.getByRole('button',{name:'Split between 2'}));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,true);
+    fireEvent.click(secondServing.getByRole('button',{name:'Share Pasta · serving 2'}));
+    for(const name of ['Hamza','Usman','Zain'])fireEvent.click(secondServing.getByRole('button',{name,exact:true}));
+    fireEvent.click(secondServing.getByRole('button',{name:'Split between 3'}));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    fireEvent.click(firstServing.getByRole('button',{name:'Edit assignments for Pasta · serving 1'}));
+    assert.equal(firstServing.getByLabelText('Pasta · serving 1 quantity for Ali').value,'0.5');
+    fireEvent.click(screen.getByRole('button',{name:'Multiple people'}));
+    fireEvent.click(screen.getByRole('button',{name:'Add another payer'}));fireEvent.click(screen.getByRole('button',{name:'Add another payer'}));
+    assert.ok(screen.getByText(/3 payers selected/));
+    fireEvent.click(screen.getByRole('button',{name:'These payers contributed equally'}));
+    for(let i=1;i<=3;i++)assert.equal(screen.getByLabelText(`Payer ${i} amount`).value,'400');
+    for(const [i,value] of [[1,'700'],[2,'300'],[3,'200']])fireEvent.change(screen.getByLabelText(`Payer ${i} amount`),{target:{value}});
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    cleanup();
+    const {default:Scoreboard}=await vite.ssrLoadModule('/src/Scoreboard.jsx');
+    render(React.createElement(Scoreboard,{rows:[{personId:'ali',averageMs:7200000,completedBills:2,openBills:1,pendingBills:0,untrackedBills:0,oldestOpenAt:'2026-11-01T00:00:00Z'},{personId:'sara',averageMs:null,completedBills:0,openBills:0,pendingBills:0,untrackedBills:1}],people:[user,sara],userId:'ali'}));
+    assert.ok(screen.getByText('2h 0m'));assert.ok(screen.getByText('No score yet'));assert.ok(screen.getByText(/Rejected reports never count as paid/));cleanup();
 
     const {default:BillDetails}=await vite.ssrLoadModule('/src/BillDetails.jsx');
     const hamza={id:'hamza',name:'Hamza',claimed:true,paymentDetails:''};

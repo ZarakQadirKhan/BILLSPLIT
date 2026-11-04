@@ -151,3 +151,13 @@ New bills use today's local date (editable) and a name supplied by the user. Sca
 Receiving repayments requires a joined account, but saving bank/wallet/transfer details is optional. Email verification is only needed for email notifications, not publishing bills.
 
 **Friends → Add a friend** lists joined members (names and usernames only) and filters as you type. Send, accept, decline and cancel requests inside the app; pending requests appear in Friends and the inbox and refresh with app state. Acceptance creates mutual contacts. Old invitation links remain supported for previously created placeholders so their existing bill history can still be claimed; new friend discovery uses in-app requests.
+
+## Separate servings, payer contributions and scoreboard
+
+For quantity-two (or more) dishes, **Assign each serving separately** creates one editable row per serving while preserving the exact combined price, discount eligibility and missing-price checks. Each row can be assigned solo or shared equally by its own selected group. Existing assignments are cleared only after an explicit on-screen confirmation. The normal draft storage, review, publication and repeat-bill flows preserve these ordinary bill rows.
+
+In **Who paid? → Multiple people**, add each payer and enter their actual contribution. The count is shown above the fields. **These payers contributed equally** divides the final bill between the selected payers with exact paisa rounding. Contributions must match the total; a payer’s own food share is deducted before calculating repayments. A payer who contributed less than their own share can still owe another payer.
+
+**Friends → The payback scoreboard** ranks average repayment duration for completed shared bills visible to the current viewer. One person's whole bill counts once, including all partial payments and creditors. Time starts at server-recorded publication and ends at the latest payment-report timestamp among confirmed payments needed to settle the bill, excluding approval delays. Open and pending bills are displayed separately. No-repayment bills do not count as instant payments. Historical assignment notifications supply the baseline where available; incomplete historical timing is excluded rather than estimated from an editable bill date.
+
+Rejecting a payment restores its payable amount, keeps the original publication/assignment time, sends the existing rejection email, and resumes eligibility for the daily reminder schedule (for verified emails with notifications enabled). Confirmation removes only the amount confirmed; fully cleared or pending-only balances do not receive daily reminders. No new paid services are used.

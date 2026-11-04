@@ -15,6 +15,7 @@ export default function ItemAssignments({
   participants,
   user,
   onChange,
+  onSeparate,
 }) {
   const [sharing, setSharing] = useState(false);
   const [expandedDone,setExpandedDone]=useState(false);
@@ -54,6 +55,11 @@ export default function ItemAssignments({
           <Users size={16} /> Share
         </button>
       </div>
+      {onSeparate && Number.isInteger(item.quantity) && item.quantity > 1 && <div className="separate-servings">
+        <button className="button full" onClick={onSeparate}>Assign each serving separately</button>
+        <small>Different groups sharing the same dish? Give each serving its own people.</small>
+      </div>}
+      {done && <p className="tap-hint">{item.allocations.filter(a => a.quantity > 0).map(a => participants.find(p => p.id === a.personId)?.name || 'Friend').join(' · ')}</p>}
       {autoCollapse&&done&&!expandedDone?<button className="button full" onClick={()=>setExpandedDone(true)}>Edit assignments for {item.name}</button>:!sharing ? (
         <>
           <p className="tap-hint">

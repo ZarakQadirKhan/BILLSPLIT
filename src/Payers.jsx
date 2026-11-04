@@ -1,6 +1,6 @@
 import React from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { money } from '../shared/calculations.js';
+import { money, distribute } from '../shared/calculations.js';
 import { MoneyInput } from './ui.jsx';
 
 export const receiversReady = (result, people) => result.transfers.every(t => {
@@ -20,12 +20,17 @@ export function PayerPicker({ bill, result, people, change, onProfile }) {
       <button type="button" className={multiple ? 'active' : ''} aria-pressed={multiple} onClick={() => update(result.payments.map(p => ({ ...p })))}>Multiple people</button>
     </div>
     {!multiple ? <label>Who paid the original bill?<select value={bill.paidBy} onChange={e => change({ paidBy: e.target.value })}>{participants.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label> : <>
+      <p className="muted">{bill.payments.length} {bill.payments.length === 1 ? 'payer' : 'payers'} selected. Add everyone who contributed, then enter what each paid.</p>
       {result.payments.map((payment, i) => <div className="contribution-row" key={i}>
         <label>Payer {i + 1}<select value={payment.personId} onChange={e => update(bill.payments.map((p, j) => j === i ? { ...p, personId: e.target.value } : p))}>{participants.filter(p => p.id === payment.personId || !bill.payments.some(x => x.personId === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label>Amount paid<MoneyInput aria-label={`Payer ${i + 1} amount`} value={payment.amountCents} onChange={amountCents => update(bill.payments.map((p, j) => j === i ? { ...p, amountCents } : p))}/></label>
         <button type="button" className="icon-button" aria-label={`Remove payer ${i + 1}`} disabled={bill.payments.length < 2} onClick={() => update(bill.payments.filter((_, j) => j !== i))}><Trash2 size={18}/></button>
       </div>)}
       <button type="button" className="text-button" disabled={!available.length} onClick={() => update([...bill.payments, { personId: available[0].id, amountCents: Math.max(0, result.paymentDifference) }])}><Plus size={16}/> Add another payer</button>
+      <button type="button" className="button full" disabled={bill.payments.length < 2 || result.total <= 0} onClick={() => {
+        const amounts = distribute(result.total, Object.fromEntries(bill.payments.map(p => [p.personId, 1])));
+        update(bill.payments.map(p => ({ ...p, amountCents: amounts[p.personId] })));
+      }}>These payers contributed equally</button>
       <p className={result.paymentDifference ? 'notice' : 'footnote'} role="status">{result.paymentDifference > 0 ? `${money(result.paymentDifference)} still to account for` : result.paymentDifference < 0 ? `${money(-result.paymentDifference)} more than the bill total` : 'Contributions match the bill total.'}</p>
     </>}
     <small>Each person’s own share is deducted from what they paid. We calculate the remaining transfers.</small>

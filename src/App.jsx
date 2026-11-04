@@ -57,6 +57,7 @@ import {createCelebrationAudio} from './celebration-audio.js';
 import {CreateOuting,MoveBillOuting,AddExistingBill,OutingList,OutingDetails} from './Outings.jsx';
 import {repeatBill} from './repeat-bill.js';
 import FindFriends, {FriendRequests} from './FriendRequests.jsx';
+import Scoreboard from './Scoreboard.jsx';
 
 export default function App() {
   const [outingId,setOutingId]=useState(null),[billSection,setBillSection]=useState('bills');
@@ -607,6 +608,7 @@ export default function App() {
               {view === "friends" && (
                 <>
                 <FriendRequests requests={state.friendRequests} userId={user.id} onChanged={refresh}/>
+                <Scoreboard rows={state.scoreboard} people={people} userId={user.id}/>
                 <div className="friends-grid">
                   {people
                     .filter((p) => p.id !== user.id)

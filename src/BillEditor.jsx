@@ -27,6 +27,7 @@ import { assignedQuantity, equalAllocations } from "../shared/allocations.js";
 import { useDraftAutosave } from './drafts.js';
 import ReceiptQuestions from './ReceiptQuestions.jsx';
 import {OutingPicker} from './Outings.jsx';
+import {separateServings} from '../shared/servings.js';
 
 export default function BillEditor({
   initial,
@@ -62,6 +63,11 @@ export default function BillEditor({
   let validationError = "";
   try { validateBill(bill); } catch (e) { validationError = e.message; }
   const change = (patch) => setBill((current) => ({ ...current, ...patch }));
+  const separate = item => {
+    if (item.allocations.length && !window.confirm('Separate these servings? You’ll choose who shared each one again. The total stays the same.')) return;
+    try { const items = separateServings(bill.items, item.id); undoAssignments.current = null; change({ items }); }
+    catch (e) { setError(e.message); }
+  };
   const finishConsent = (choice) => {
     setAwaitingConsent(false);
     consentResolver.current?.(choice);
@@ -905,6 +911,7 @@ export default function BillEditor({
                     item={item}
                     participants={participants}
                     user={user}
+                    onSeparate={() => separate(item)}
                     onChange={(patch) => changeItem(item.id, patch)}
                   />
                 ))}

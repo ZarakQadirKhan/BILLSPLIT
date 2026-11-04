@@ -50,3 +50,19 @@ test('multi-payer settlement conserves every balance over 499 unequal, rounded b
     assert.ok(Object.values(net).every(x=>x===0));
   }
 });
+
+test('three equal or unequal original contributions calculate every repayment without self-payments', () => {
+  const b = newRideBill('a'); b.participants=['a','b','c','d','e']; b.fareCents=900000;
+  b.payments=['a','b','c'].map(personId=>({personId,amountCents:300000}));
+  let result=calculate(validateBill(b));
+  assert.equal(result.complete,true);
+  assert.deepEqual(result.balances,{a:120000,b:120000,c:120000,d:-180000,e:-180000});
+  assert.equal(result.transfers.length,6);assert.ok(result.transfers.every(t=>t.amount===60000));
+  b.payments=[{personId:'a',amountCents:600000},{personId:'b',amountCents:200000},{personId:'c',amountCents:100000}];
+  result=calculate(validateBill(b));
+  assert.deepEqual(result.balances,{a:420000,b:20000,c:-80000,d:-180000,e:-180000});
+  const net={...result.balances};
+  for(const transfer of result.transfers){assert.notEqual(transfer.debtorId,transfer.creditorId);net[transfer.debtorId]+=transfer.amount;net[transfer.creditorId]-=transfer.amount;}
+  assert.ok(Object.values(net).every(value=>value===0));
+  assert.ok(result.transfers.some(t=>t.debtorId==='c'),'an original payer who underpaid still owes their remainder');
+});

@@ -10,6 +10,7 @@ import { createRepaymentService } from './repayments.js';
 import { payableAmount } from '../shared/payments.js';
 import { queueDailyReminders, validCronSecret } from './reminders.js';
 import { mountFriends, pendingFriendRequests } from './friends.js';
+import { readScoreboard } from './scoreboard.js';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -17,7 +18,7 @@ const now = () => new Date().toISOString();
 const fail = (message, status = 400) => { const error = Error(message); error.status = status; throw error; };
 const clean = (value, max = 200) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 const publicUser = row => ({ id: row.id, name: row.name, username: row.username || null, claimed: !!row.claimed, paymentDetails: row.payment_details || '' });
-const billResult = row => ({ ...row.data, id: row.id, creatorId: row.creator_id, status: row.status, version: row.version, createdAt: row.created_at });
+const billResult = row => ({ ...row.data, id: row.id, creatorId: row.creator_id, status: row.status, version: row.version, createdAt: row.created_at, publishedAt: row.published_at || null });
 const debtResult = row => ({ ...row, paymentStatus: row.status === 'confirmed' ? 'paid' : row.status === 'marked_paid' ? 'pending_confirmation' : 'unpaid' });
 
 export async function createApi(dataDirectory, options = {}) {
@@ -40,7 +41,7 @@ export async function createApi(dataDirectory, options = {}) {
     await mail.queueVerification(user, code, codeHash);
   }
   const event = (user_id, bill_id, message) => db.insert('events', { id: randomUUID(), user_id, bill_id, message, is_read: false, created_at: now() });
-  const payments = createRepaymentService(db,mail,event);
+  const payments = createRepaymentService(db,mail,event,{clock:options.clock});
   async function issueSession(user_id) {
     const token = secret();
     await db.insert('sessions', { id: hash(token), user_id });
@@ -183,8 +184,9 @@ export async function createApi(dataDirectory, options = {}) {
       const debts = await db.many('debts', { bill_id: { $in: rows.map(row => row.id) } });
       const repayments = await db.many('repayments', { $or: [{ debtor_id: userId }, { creditor_id: userId }] }, { sort: { created_at: -1 } });
       const events = await db.many('events', { user_id: userId }, { sort: { created_at: -1 }, limit: 200 });
+      const scoreboard = await readScoreboard(db, people, rows, debts, (options.clock?.() ?? new Date()).getTime());
       const emailQueue = await db.many('email_outbox', { user_id: userId, status: { $in: ['pending', 'sending', 'failed'] } }, { projection: { _id: 0, status: 1, last_error: 1 }, sort: { created_at: -1 } });
-      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), friendRequests, outings, bills: rows.map(billResult), debts: debts.map(debtResult), repayments, events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
+      return { user: selfUser(await getUser(userId)), people: people.map(publicUser), scoreboard, friendRequests, outings, bills: rows.map(billResult), debts: debts.map(debtResult), repayments, events, emailDelivery: { queued: emailQueue.filter(m => m.status !== 'failed').length, failed: emailQueue.filter(m => m.status === 'failed').length, issue: emailQueue.find(m => m.last_error)?.last_error?.category || null } };
     });
     res.json(state);
   });
@@ -328,8 +330,9 @@ export async function createApi(dataDirectory, options = {}) {
         const payer = await getUser(receiver);
         if (!payer?.claimed) fail('Everyone receiving repayments needs to join the app first. Payment details are optional.');
       }
-      await db.update('bills', { id: row.id }, { $set: { status: 'published' }, $inc: { version: 1 } });
-      for (const transfer of result.transfers) await db.insert('debts', { id: randomUUID(), bill_id: row.id, debtor_id: transfer.debtorId, creditor_id: transfer.creditorId, amount: transfer.amount, status: 'assigned', reference: '', note: '', updated_at: now() });
+      const publishedAt = (options.clock?.() ?? new Date()).toISOString();
+      await db.update('bills', { id: row.id }, { $set: { status: 'published', published_at: publishedAt }, $inc: { version: 1 } });
+      for (const transfer of result.transfers) await db.insert('debts', { id: randomUUID(), bill_id: row.id, debtor_id: transfer.debtorId, creditor_id: transfer.creditorId, amount: transfer.amount, status: 'assigned', reference: '', note: '', assigned_at: publishedAt, updated_at: publishedAt });
       for (const p of bill.participants) await event(p, row.id, `${bill.title}: review your share and repayments.`);
       for (const debt of await db.many('debts', { bill_id: row.id })) await mail.queueDebt('owed', debt, debt.debtor_id);
       return billResult(await db.one('bills', { id: row.id }));

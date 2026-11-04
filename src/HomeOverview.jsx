@@ -45,6 +45,7 @@ export function GroupedBalances({debts,user,person,bills,filter,onOpen,onPaid}) 
     const amount=rows.reduce((sum,d)=>sum+payableAmount(d),0);
     return <section className="balance-entry friend-balance" key={other}>
       <div className="share-preview"><Avatar name={person(other).name}/><div className="row-description"><strong>{person(other).name}</strong><small>{incoming?'Owes you':'You owe'} · {new Set(rows.map(d=>d.bill_id)).size} bills</small></div><strong>{money(amount)}</strong></div>
+      {rows.some(d => d.last_rejected_at) && <p className="notice">A payment wasn’t confirmed. The unpaid amount is back here; its original clock continues.</p>}
       <details><summary>Choose bills & see breakdown</summary>{rows.map(d=><button className="balance-row" key={d.id} onClick={()=>onOpen(d.bill_id)}><span>{bills.find(b=>b.id===d.bill_id)?.title||'Shared bill'}</span><strong>{money(payableAmount(d))}</strong><ChevronRight size={15}/></button>)}<small>You can select which bills to include in the payment form.</small></details>
       {!incoming&&<button className="button primary" onClick={()=>onPaid({...rows[0],id:`group-${other}`,debts:rows.map(d=>({...d,billTitle:bills.find(b=>b.id===d.bill_id)?.title||'Shared bill'})),amount,paid_amount:0,pending_amount:0,status:'assigned'})}>I’ve paid</button>}
     </section>;

@@ -2,7 +2,8 @@ import { confirmedAmount, pendingAmount, payableAmount, paymentStatus } from '..
 
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const clean=(value,max)=>typeof value==='string'?value.trim().slice(0,max):'';
-export function createRepaymentService(db,mail,event) {
+export function createRepaymentService(db,mail,event,{clock=()=>new Date()}={}) {
+  const now=()=>clock().toISOString();
   async function report(user,body) {
     const {debtIds,amountCents,requestId}=body;
     if(!Array.isArray(debtIds)||!debtIds.length||debtIds.length>100||debtIds.some(x=>typeof x!=='string')||new Set(debtIds).size!==debtIds.length) fail('Choose up to 100 unique payments.');
@@ -28,9 +29,9 @@ export function createRepaymentService(db,mail,event) {
         const amount=Math.min(left,payableAmount(d)); if(!amount) continue;
         const paid=confirmedAmount(d),pending=pendingAmount(d)+amount;
         allocations.push({debtId:d.id,billId:d.bill_id,amount}); left-=amount;
-        await db.update('debts',{id:d.id},{$set:{paid_amount:paid,pending_amount:pending,status:paymentStatus(d.amount,paid,pending),reference,marked_paid_at:new Date().toISOString(),updated_at:new Date().toISOString()}});
+        await db.update('debts',{id:d.id},{$set:{paid_amount:paid,pending_amount:pending,status:paymentStatus(d.amount,paid,pending),reference,marked_paid_at:now(),updated_at:now()}});
       }
-      const payment={id,debtor_id:user.id,creditor_id:debts[0].creditor_id,amount:amountCents,allocations,requestedDebtIds:debtIds,reference,note:'',status:'pending',created_at:new Date().toISOString()};
+      const payment={id,debtor_id:user.id,creditor_id:debts[0].creditor_id,amount:amountCents,allocations,requestedDebtIds:debtIds,reference,note:'',status:'pending',created_at:now()};
       await db.insert('repayments',payment);
       await event(payment.creditor_id,allocations[0].billId,`${user.name} reported a payment. Please confirm the amount received.`);
       await mail.queueRepayment('approval',payment,payment.creditor_id);
@@ -50,9 +51,9 @@ export function createRepaymentService(db,mail,event) {
         if(!d||d.creditor_id!==p.creditor_id||d.debtor_id!==p.debtor_id||pendingAmount(d)<a.amount) fail('Payment records changed. Refresh and try again.',409);
         const paid=confirmedAmount(d)+(action==='confirm'?a.amount:0),pending=pendingAmount(d)-a.amount;
         if(paid>d.amount) fail('Payment exceeds the original share.',409);
-        await db.update('debts',{id:d.id},{$set:{paid_amount:paid,pending_amount:pending,status:paymentStatus(d.amount,paid,pending),note:explanation||d.note,updated_at:new Date().toISOString(),...(action==='confirm'?{confirmed_at:new Date().toISOString()}: {})}});
+        await db.update('debts',{id:d.id},{$set:{paid_amount:paid,pending_amount:pending,status:paymentStatus(d.amount,paid,pending),note:explanation||d.note,updated_at:now(),...(action==='confirm'?{confirmed_at:now()}:{last_rejected_at:now(),last_rejection_note:explanation})}});
       }
-      const updated={...p,status:action==='confirm'?'confirmed':'rejected',note:explanation,reviewed_at:new Date().toISOString()};
+      const updated={...p,status:action==='confirm'?'confirmed':'rejected',note:explanation,reviewed_at:now()};
       await db.update('repayments',{id},{$set:{status:updated.status,note:explanation,reviewed_at:updated.reviewed_at}});
       await event(p.debtor_id,p.allocations[0].billId,`${user.name} ${action==='confirm'?'confirmed your payment':'could not confirm your payment'}.`);
       await mail.queueRepayment(action==='confirm'?'confirmed':'rejected',updated,p.debtor_id);

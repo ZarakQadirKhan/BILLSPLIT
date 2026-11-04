@@ -125,6 +125,7 @@ export default function BillDetails({
                   </small>
                   <strong>{money(myDebt.status==='confirmed'?confirmedAmount(myDebt):payableAmount(myDebt))}</strong>
                   <p className="muted">Original share {money(myDebt.amount)} · Confirmed {money(confirmedAmount(myDebt))} · Awaiting confirmation {money(pendingAmount(myDebt))}</p>
+                  {myDebt.last_rejected_at && payableAmount(myDebt) > 0 && <p className="notice">Payment not confirmed: {myDebt.last_rejection_note}. This amount is still owed; the clock runs from when this bill was first sent.</p>}
                 </div>
               </div>
               <details className="optional-breakdown"><summary>How your share was calculated</summary><Breakdown result={result.shares[user.id]} compact /></details>

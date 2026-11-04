@@ -32,6 +32,8 @@ export async function openDatabase(_directory, options = {}) {
     await mongo.collection('repayments').createIndex({ creditor_id: 1, status: 1 });
     await mongo.collection('repayments').createIndex({ debtor_id: 1, created_at: -1 });
     await mongo.collection('repayments').createIndex({ 'allocations.debtId': 1, status: 1 });
+    await mongo.collection('repayments').createIndex({ 'allocations.billId': 1, status: 1 });
+    await mongo.collection('events').createIndex({ bill_id: 1, created_at: 1 });
     await mongo.collection('events').createIndex({ user_id: 1, created_at: -1 });
     await mongo.collection('rate_limits').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
     await mongo.collection('email_outbox').createIndex({ status: 1, retry_at: 1, lease_until: 1 });

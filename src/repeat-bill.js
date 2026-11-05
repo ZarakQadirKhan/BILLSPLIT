@@ -9,6 +9,7 @@ export function repeatBill(source) {
   bill.receiptId=null;
   bill.receiptTotalCents=null;
   delete bill.receiptReview;
+  bill.tax = { ...bill.tax, confirmed: false };
   bill.adjustmentCents=0;
   bill.adjustmentReason='';
   bill.items=bill.items.map(item=>({...item,id:id()}));

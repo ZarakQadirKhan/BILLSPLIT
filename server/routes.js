@@ -325,6 +325,7 @@ export async function createApi(dataDirectory, options = {}) {
       if (req.body.version !== row.version) fail('This bill changed. Reopen it before sending.', 409);
       const bill = validateBill(row.data), result = calculate(bill);
       await checkOuting(bill.outingId,req.user.id,bill.participants);
+      if (result.taxMissing) fail('Enter tax before sending. Enter 0 if there was no tax.');
       if (!result.complete) fail('Assign every item, make payer contributions match the total, and resolve calculation differences before sending.');
       for (const receiver of new Set(result.transfers.map(t => t.creditorId))) {
         const payer = await getUser(receiver);

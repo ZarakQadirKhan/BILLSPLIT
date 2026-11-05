@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {writeDraft,readDrafts,removeDraft} from '../src/drafts.js';
-import {newBill} from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 test('device drafts restore incomplete bills, isolate users and never persist image or secret fields',()=>{
   const values=new Map(),storage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
   const b={...newBill('ali'),title:'Unfinished',image:'SECRET',transcription:'SECRET',apiKey:'SECRET',items:[{id:'one',name:'',quantity:1,unitPriceCents:0,priceMissing:true,allocations:[],photo:'SECRET'}]};

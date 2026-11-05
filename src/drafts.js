@@ -8,7 +8,7 @@ export function draftSnapshot(bill) {
   const data=pick(bill,['id','version','creatorId','status','title','date','paidBy','participants','kind','fareCents','entryMode','deliveryCents','serviceCents','tipCents','adjustmentCents','adjustmentReason','chargeSplit','receiptTotalCents','outingId','_repeatTitle']);
   data.items=(bill.items||[]).map(i=>({...pick(i,['id','name','quantity','unitPriceCents','lineTotalCents','eligible','uncertain','priceMissing']),allocations:(i.allocations||[]).map(a=>pick(a,['personId','quantity']))}));
   data.discount=pick(bill.discount||{},['type','rate','amountCents','eligibleCapCents','maxDiscountCents']);
-  data.tax=pick(bill.tax||{},['type','rate','amountCents','basis']);
+  data.tax=pick(bill.tax||{},['type','rate','amountCents','basis','confirmed']);
   if(Array.isArray(bill.payments))data.payments=bill.payments.map(p=>pick(p,['personId','amountCents']));
   if(bill.receiptReview)data.receiptReview={...pick(bill.receiptReview,['needsTotal','selectedOption']),options:(bill.receiptReview.options||[]).map(o=>pick(o,['label','taxCents','taxRate','taxBasis','receiptTotalCents']))};
   return data;

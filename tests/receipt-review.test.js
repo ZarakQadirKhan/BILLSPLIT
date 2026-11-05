@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizeReceipt} from '../shared/receipt-schema.js';
-import {calculate,newBill,validateBill} from '../shared/calculations.js';
+import { calculate, validateBill } from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 import {extractReceipt} from '../src/receipt-scan.js';
 
 const options=[{label:'Card',taxCents:80575,taxRate:5,taxBasis:null,receiptTotalCents:null},{label:'Cash',taxCents:257840,taxRate:16,taxBasis:null,receiptTotalCents:1869340}];
@@ -13,7 +14,7 @@ test('legacy payment options do not block manual tax or a calculated total; miss
   assert.deepEqual(stored.receiptReview,bill.receiptReview);
   stored.tax.amountCents=80575;assert.equal(calculate(stored).total,1692075);assert.equal(calculate(stored).complete,true);
   stored.tax.amountCents=0;assert.equal(calculate(stored).total,1611500);assert.equal(calculate(stored).complete,true);
-  stored.tax={type:'percent',rate:16,amountCents:0,basis:'after'};assert.equal(calculate(stored).total,1869340);
+  stored.tax={type:'percent',rate:16,amountCents:0,basis:'after',confirmed:true};assert.equal(calculate(stored).total,1869340);
   stored.receiptTotalCents=1692075;assert.equal(calculate(stored).complete,false,'an explicitly entered receipt check still catches mismatches');
   stored.receiptTotalCents=null;
   stored.items[0].priceMissing=true;assert.equal(calculate({...stored,receiptReview:null}).complete,false);

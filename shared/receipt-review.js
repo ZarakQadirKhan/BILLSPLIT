@@ -1,5 +1,8 @@
+export const taxNeedsEntry = bill => bill.kind !== 'ride' && bill.status !== 'published' && bill.tax?.confirmed !== true;
+
 export function receiptReviewErrors(bill) {
   const errors=[];
+  if (taxNeedsEntry(bill)) errors.push('Enter tax before sending. Enter 0 if there was no tax.');
   for(const item of bill.items||[]) if(item.priceMissing) errors.push(`Enter the price for ${item.name || 'this item'}, or confirm it was free.`);
   return errors;
 }

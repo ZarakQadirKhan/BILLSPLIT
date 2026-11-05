@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
 import { createApi } from '../server/api.js';
-import { newBill } from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 import { payableAmount } from '../shared/payments.js';
 import { reminderBalance, queueDailyReminders, reminderContent } from '../server/reminders.js';
 

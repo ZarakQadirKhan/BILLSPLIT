@@ -28,6 +28,7 @@ import { useDraftAutosave } from './drafts.js';
 import ReceiptQuestions from './ReceiptQuestions.jsx';
 import {OutingPicker} from './Outings.jsx';
 import {separateServings} from '../shared/servings.js';
+import './tax-entry.css';
 
 export default function BillEditor({
   initial,
@@ -54,6 +55,14 @@ export default function BillEditor({
     [busy, setBusy] = useState(false);
   const [onlyUnassigned,setOnlyUnassigned]=useState(false);
   const undoAssignments=useRef(null);
+  const taxSection=useRef(null);
+  const [focusTax,setFocusTax]=useState(0);
+  useEffect(()=>{
+    if(!focusTax || step!=="review")return;
+    taxSection.current?.scrollIntoView?.({block:"center",behavior:"smooth"});
+    taxSection.current?.querySelector('input')?.focus({preventScroll:true});
+  },[focusTax,step]);
+
   const draft=useMemo(()=>({...bill,entryMode}),[bill,entryMode]);
   const autosave=useDraftAutosave(user.id,draft);
   const fileRef = useRef(),
@@ -63,6 +72,11 @@ export default function BillEditor({
   let validationError = "";
   try { validateBill(bill); } catch (e) { validationError = e.message; }
   const change = (patch) => setBill((current) => ({ ...current, ...patch }));
+  const enterTax = () => { setStep("review"); setFocusTax(n=>n+1); };
+  const nextStep = () => {
+    if(result.taxMissing){enterTax();return;}
+    setStep("split");window.scrollTo?.({top:0,behavior:"instant"});
+  };
   const separate = item => {
     if (item.allocations.length && !window.confirm('Separate these servings? You’ll choose who shared each one again. The total stays the same.')) return;
     try { const items = separateServings(bill.items, item.id); undoAssignments.current = null; change({ items }); }
@@ -115,7 +129,7 @@ export default function BillEditor({
         eligibleCapCents: charges.eligibleCapCents ?? null,
         maxDiscountCents: charges.maxDiscountCents ?? null,
       },
-      tax: {type: "fixed", amountCents: 0, rate: 0, basis: "after"},
+      tax: {type: "fixed", amountCents: 0, rate: 0, basis: "after", confirmed: false},
       deliveryCents: charges.deliveryCents || 0,
       serviceCents: charges.serviceCents || 0,
       tipCents: charges.tipCents || 0,
@@ -282,7 +296,7 @@ export default function BillEditor({
         <ArrowRight size={17} />
         <button
           className={step === "split" ? "active" : ""}
-          onClick={() => setStep("split")}
+          onClick={nextStep}
         >
           <span>2</span> Split & send
         </button>
@@ -684,16 +698,16 @@ export default function BillEditor({
                   </div>
                 )}
               </details>
-              <section className="card">
-                <h2>Tax & extra charges</h2>
-                <p className="muted">Enter the tax charged, or leave it at 0. Your final total updates automatically.</p>
+              <section ref={taxSection} className={`card tax-entry ${result.taxMissing ? 'tax-entry-required' : ''}`} aria-label="Tax entry">
+                <h2>Tax & extra charges {result.taxMissing && <span className="tax-required-badge">Required</span>}</h2>
+                <p id="tax-entry-help" className={result.taxMissing ? 'tax-entry-notice' : 'muted'}>Enter the tax charged. Enter 0 if there was no tax. We split tax in proportion to what each person ordered, not equally.</p>
                 <div className="form-grid">
                   <label>
                     Tax type
                     <select
                       value={bill.tax.type}
                       onChange={(e) =>
-                        change({ tax: { ...bill.tax, type: e.target.value } })
+                        change({ tax: { ...bill.tax, type: e.target.value, confirmed: false } })
                       }
                     >
                       <option value="fixed">Exact amount from receipt</option>
@@ -705,9 +719,14 @@ export default function BillEditor({
                       Tax amount
                       <MoneyInput
                         aria-label="Tax amount"
-                        value={bill.tax.amountCents}
+                        value={bill.tax.confirmed ? bill.tax.amountCents : null}
+                        optional
+                        required
+                        placeholder="Enter tax — 0 if none"
+                        aria-invalid={result.taxMissing}
+                        aria-describedby="tax-entry-help"
                         onChange={(value) =>
-                          change({ tax: { ...bill.tax, amountCents: value } })
+                          change({ tax: { ...bill.tax, amountCents: value ?? 0, confirmed: value !== null } })
                         }
                       />
                     </label>
@@ -720,12 +739,18 @@ export default function BillEditor({
                           min="0"
                           max="100"
                           step="any"
-                          value={bill.tax.rate}
+                          aria-label="Tax percentage"
+                          required
+                          placeholder="Enter % — 0 if none"
+                          aria-invalid={result.taxMissing}
+                          aria-describedby="tax-entry-help"
+                          value={bill.tax.confirmed ? bill.tax.rate : ""}
                           onChange={(e) =>
                             change({
                               tax: {
                                 ...bill.tax,
                                 rate: Number(e.target.value),
+                                confirmed: e.target.value !== "",
                               },
                             })
                           }
@@ -948,7 +973,7 @@ export default function BillEditor({
         <aside className="editor-summary">
           <section className="card summary-card">
             <div className="section-heading">
-              <h2>Bill total</h2>
+              <h2>{result.taxMissing ? 'Total before tax' : 'Bill total'}</h2>
               <span className="live-badge">
                 <span /> Live
               </span>
@@ -1027,6 +1052,7 @@ export default function BillEditor({
                 <TransferSummary result={result} people={people}/>
               </>
             )}
+            {result.taxMissing && <button className="button full tax-jump" onClick={enterTax}>Enter tax to continue</button>}
             {validationError && <p className="inline-error">{validationError}</p>}
             {result.errors.map((e, i) => (
               <p key={i} className="inline-error">
@@ -1036,7 +1062,7 @@ export default function BillEditor({
             {step === "review" ? (
               <button
                 className="button primary full"
-                onClick={() => setStep("split")}
+                onClick={nextStep}
                 disabled={!bill.items.length || !!progress}
               >
                 Choose who had what <ArrowRight size={17} />
@@ -1086,18 +1112,15 @@ export default function BillEditor({
       </div>
       <div className="mobile-editor-action">
         <span>
-          Bill total<strong>{money(result.total)}</strong>
+          {result.taxMissing ? 'Before tax' : 'Bill total'}<strong>{money(result.total)}</strong>
         </span>
         {step === "review" ? (
           <button
             className="button primary"
             disabled={!bill.items.length || !!progress}
-            onClick={() => {
-              setStep("split");
-              window.scrollTo?.({ top: 0, behavior: "instant" });
-            }}
+            onClick={nextStep}
           >
-            Next: choose people <ArrowRight size={16} />
+            {result.taxMissing ? 'Enter tax' : 'Next: choose people'} <ArrowRight size={16} />
           </button>
         ) : (
           <button

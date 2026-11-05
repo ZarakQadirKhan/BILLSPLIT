@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
 import { createApi } from '../server/api.js';
-import { newBill } from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 
 test('in-app friend requests require consent, keep directory private and allow repayments without account details', async t => {
   const replica = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -52,6 +52,10 @@ test('in-app friend requests require consent, keep directory private and allow r
   // The receiver has joined but has neither payment details nor verified email.
   const bill = { ...newBill(ali.user.id), title: 'Dinner', participants: [ali.user.id, sara.user.id], items: [{ id: 'dinner', name: 'Dinner', quantity: 2, unitPriceCents: 10000, allocations: [{ personId: ali.user.id, quantity: 1 }, { personId: sara.user.id, quantity: 1 }] }], receiptReview: { options: [], selectedOption: null, needsTotal: true } };
   const saved = (await call('/bills', ali.token, { bill })).data;
+  const unchecked = (await call('/bills', ali.token, { bill: {...bill,status:'published',tax:{...bill.tax,confirmed:false}} })).data;
+  const refused = await call(`/bills/${unchecked.id}/publish`,ali.token,{version:unchecked.version});
+  assert.equal(refused.status,400);assert.match(refused.data.error,/Enter tax/);
+  assert.equal((await db.many('debts',{bill_id:unchecked.id})).length,0);
   assert.equal((await call(`/bills/${saved.id}/publish`, ali.token, { version: saved.version })).status, 200);
   assert.equal((await call('/state', sara.token)).data.debts[0].amount, 10000);
   const unjoined = { ...bill, paidBy: old.person.id, participants: [ali.user.id, old.person.id], items: [{ ...bill.items[0], allocations: [{ personId: ali.user.id, quantity: 2 }] }] };

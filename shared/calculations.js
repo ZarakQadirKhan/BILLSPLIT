@@ -1,5 +1,5 @@
 // All stored money is integer paisa. No model or OCR output does arithmetic.
-import { receiptReviewErrors, validateReceiptReview } from './receipt-review.js';
+import { receiptReviewErrors, validateReceiptReview, taxNeedsEntry } from './receipt-review.js';
 export const UNASSIGNED = '__unassigned__';
 export const money = cents => new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((Number(cents) || 0) / 100);
 export const toCents = value => Math.round((Number(value) || 0) * 100);
@@ -25,7 +25,7 @@ export function distribute(amount, weights) {
   return Object.fromEntries(rows.map(row => [row.key, row.value * sign]));
 }
 export function newBill(personId) {
-  return { title: '', date: new Date().toLocaleDateString('en-CA'), paidBy: personId, participants: [personId], items: [], discount: { type: 'none', rate: 0, amountCents: 0, eligibleCapCents: null, maxDiscountCents: null }, tax: { type: 'fixed', rate: 0, amountCents: 0, basis: 'after' }, deliveryCents: 0, serviceCents: 0, tipCents: 0, adjustmentCents: 0, adjustmentReason: '', chargeSplit: 'proportional', receiptTotalCents: null, receiptId: null };
+  return { title: '', date: new Date().toLocaleDateString('en-CA'), paidBy: personId, participants: [personId], items: [], discount: { type: 'none', rate: 0, amountCents: 0, eligibleCapCents: null, maxDiscountCents: null }, tax: { type: 'fixed', rate: 0, amountCents: 0, basis: 'after', confirmed: false }, deliveryCents: 0, serviceCents: 0, tipCents: 0, adjustmentCents: 0, adjustmentReason: '', chargeSplit: 'proportional', receiptTotalCents: null, receiptId: null };
 }
 export function newRideBill(personId) {
   return normalizeBill({ ...newBill(personId), kind: 'ride', title: 'inDrive ride', fareCents: 0 });
@@ -37,7 +37,7 @@ export function normalizeBill(bill) {
     ...bill,
     items: [{ id: 'ride-fare', name: 'inDrive fare', quantity: Math.max(1, participants.length), unitPriceCents: 0, lineTotalCents: bill.fareCents, eligible: false, allocations: participants.map(personId => ({ personId, quantity: 1 })) }],
     discount: { type: 'none', rate: 0, amountCents: 0, eligibleCapCents: null, maxDiscountCents: null },
-    tax: { type: 'fixed', rate: 0, amountCents: 0, basis: 'after' },
+    tax: { type: 'fixed', rate: 0, amountCents: 0, basis: 'after', confirmed: true },
     deliveryCents: 0, serviceCents: 0, tipCents: 0, adjustmentCents: 0, adjustmentReason: '', chargeSplit: 'equal', receiptTotalCents: bill.fareCents, receiptId: null,
   };
 }
@@ -98,7 +98,8 @@ export function calculate(bill) {
   discount = Math.max(0, Math.min(discount || 0, eligibleBase, d.maxDiscountCents ?? Infinity));
   for (const [person, value] of Object.entries(distribute(discount, eligibleShares))) ensure(person).discount = value;
   const t = bill.tax || {}, taxable = t.basis === 'before' ? subtotal : subtotal - discount;
-  const tax = t.type === 'percent' ? Math.round(taxable * (t.rate || 0) / 100) : t.amountCents || 0;
+  const taxMissing = taxNeedsEntry(bill);
+  const tax = taxMissing ? 0 : t.type === 'percent' ? Math.round(taxable * (t.rate || 0) / 100) : t.amountCents || 0;
   const fees = (bill.deliveryCents || 0) + (bill.serviceCents || 0) + (bill.tipCents || 0) + (bill.adjustmentCents || 0);
   const discountedWeights = Object.fromEntries(Object.entries(shares).map(([p, s]) => [p, s.items - s.discount]));
   const beforeWeights = Object.fromEntries(Object.entries(shares).map(([p, s]) => [p, s.items]));
@@ -116,7 +117,7 @@ export function calculate(bill) {
   const unassigned = shares[UNASSIGNED].total;
   const receiptDifference = bill.receiptTotalCents == null ? 0 : bill.receiptTotalCents - total;
   const settled = settlement(bill, total, shares);
-  return { subtotal, eligibleSubtotal, eligibleBase, discount, taxable, tax, fees, total, shares, unassigned, unassignedUnits, assigned: total - unassigned, receiptDifference, ...settled, errors, complete: !errors.length && unassigned === 0 && unassignedUnits < 0.000001 && receiptDifference === 0 && settled.paymentDifference === 0 && total > 0 && (bill.items || []).length > 0 };
+  return { subtotal, eligibleSubtotal, eligibleBase, discount, taxable, tax, taxMissing, fees, total, shares, unassigned, unassignedUnits, assigned: total - unassigned, receiptDifference, ...settled, errors, complete: !errors.length && unassigned === 0 && unassignedUnits < 0.000001 && receiptDifference === 0 && settled.paymentDifference === 0 && total > 0 && (bill.items || []).length > 0 };
 }
 export function validateBill(bill) {
   if (!bill || typeof bill !== 'object') throw Error('Invalid bill.');
@@ -149,6 +150,7 @@ export function validateBill(bill) {
     for (const a of item.allocations) if (!bill.participants.includes(a.personId) || !Number.isFinite(a.quantity) || a.quantity < 0 || a.quantity > 10000) throw Error('Invalid assigned quantity.');
   }
   const d = bill.discount, t = bill.tax;
+  if (t?.confirmed != null && typeof t.confirmed !== 'boolean') throw Error('Confirm the tax entry.');
   if (!d || !['none', 'fixed', 'percent'].includes(d.type) || !Number.isFinite(d.rate) || d.rate < 0 || d.rate > 100 || !cents(d.amountCents) || (d.eligibleCapCents != null && !cents(d.eligibleCapCents)) || (d.maxDiscountCents != null && !cents(d.maxDiscountCents))) throw Error('Check your discount settings.');
   if (!t || !['fixed', 'percent'].includes(t.type) || !['before', 'after'].includes(t.basis) || !Number.isFinite(t.rate) || t.rate < 0 || t.rate > 100 || !cents(t.amountCents)) throw Error('Check your tax settings.');
   for (const k of ['deliveryCents', 'serviceCents', 'tipCents']) if (!cents(bill[k])) throw Error('Check your additional charges.');
@@ -166,6 +168,6 @@ export function validateBill(bill) {
   if (bill.kind === 'ride') stored.fareCents = bill.fareCents;
   stored.items = bill.items.map(item => ({ id: item.id, name: item.name, quantity: item.quantity, unitPriceCents: item.unitPriceCents, lineTotalCents: item.lineTotalCents ?? null, priceMissing:!!item.priceMissing, eligible: item.eligible !== false, allocations: item.allocations.map(({ personId, quantity }) => ({ personId, quantity })) }));
   stored.discount = Object.fromEntries(['type', 'rate', 'amountCents', 'eligibleCapCents', 'maxDiscountCents'].map(key => [key, bill.discount[key]]));
-  stored.tax = Object.fromEntries(['type', 'rate', 'amountCents', 'basis'].map(key => [key, bill.tax[key]]));
+  stored.tax = { ...Object.fromEntries(['type', 'rate', 'amountCents', 'basis'].map(key => [key, bill.tax[key]])), confirmed: bill.tax.confirmed === true };
   return stored;
 }

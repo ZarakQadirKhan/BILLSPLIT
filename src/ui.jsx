@@ -120,14 +120,14 @@ export function Breakdown({ result, compact = false }) {
       </div>
       <div>
         <span>Tax</span>
-        <span>{money(result.tax)}</span>
+        <span>{result.taxMissing ? 'Entry required' : money(result.tax)}</span>
       </div>
       <div>
         <span>Fees & adjustments</span>
         <span>{money(result.fees)}</span>
       </div>
       <div className="total">
-        <span>{compact ? "Your share" : "Final bill"}</span>
+        <span>{result.taxMissing ? 'Total before tax' : compact ? "Your share" : "Final bill"}</span>
         <strong>{money(result.total)}</strong>
       </div>
     </div>

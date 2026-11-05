@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { JSDOM } from 'jsdom';
 import { createServer } from 'vite';
-import { newBill, newRideBill } from '../shared/calculations.js';
+import { newRideBill, newBill as unreviewedBill } from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 
 test('interactive editor recalculates capped discounts, allocations and receipt reconciliation', async () => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { url:'http://localhost:5173/',pretendToBeVisual:true });
@@ -103,6 +104,30 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     render(React.createElement(Scoreboard,{rows:[{personId:'ali',averageMs:7200000,completedBills:2,openBills:1,pendingBills:0,untrackedBills:0,oldestOpenAt:'2026-11-01T00:00:00Z'},{personId:'sara',averageMs:null,completedBills:0,openBills:0,pendingBills:0,untrackedBills:1}],people:[user,sara],userId:'ali'}));
     assert.ok(screen.getByText('2h 0m'));assert.ok(screen.getByText('No score yet'));assert.ok(screen.getByText(/Rejected reports never count as paid/));cleanup();
 
+    // Missing tax is highlighted and the next action focuses it; zero is explicit.
+    const needsTax={...unreviewedBill('ali'),title:'Tax review',entryMode:'manual',participants:['ali','sara'],items:[{id:'tax-food',name:'Food',quantity:2,unitPriceCents:50000,allocations:[{personId:'ali',quantity:1},{personId:'sara',quantity:1}]}]};
+    render(React.createElement(BillEditor,{initial:needsTax,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+    assert.equal(screen.getByLabelText('Tax amount').value,'');
+    assert.equal(screen.getByLabelText('Tax amount').getAttribute('aria-invalid'),'true');
+    assert.ok(screen.getByLabelText('Tax entry').classList.contains('tax-entry-required'));
+    fireEvent.click(screen.getByRole('button',{name:'Enter tax',exact:true}));
+    assert.equal(document.activeElement,screen.getByLabelText('Tax amount'));
+    assert.equal(screen.queryByRole('button',{name:'Send everyone their share'}),null);
+    fireEvent.change(screen.getByLabelText('Tax amount'),{target:{value:'0'}});
+    assert.equal(screen.getByLabelText('Tax amount').getAttribute('aria-invalid'),'false');
+    fireEvent.click(screen.getByRole('button',{name:'Next: choose people'}));
+    assert.equal(screen.getByRole('button',{name:'Send everyone their share'}).disabled,false);
+    fireEvent.click(screen.getByRole('button',{name:'1 Review the bill'}));
+    fireEvent.change(screen.getByLabelText('Tax amount'),{target:{value:''}});
+    assert.equal(screen.getByLabelText('Tax amount').getAttribute('aria-invalid'),'true');
+    fireEvent.change(screen.getByLabelText('Tax type'),{target:{value:'percent'}});
+    assert.equal(screen.getByLabelText('Tax percentage').value,'');
+    fireEvent.change(screen.getByLabelText('Tax percentage'),{target:{value:'10'}});
+    assert.equal(screen.getByLabelText('Tax percentage').getAttribute('aria-invalid'),'false');
+    fireEvent.change(screen.getByLabelText('Tax percentage'),{target:{value:''}});
+    assert.equal(screen.getByLabelText('Tax percentage').getAttribute('aria-invalid'),'true');
+    cleanup();
+
     const {default:BillDetails}=await vite.ssrLoadModule('/src/BillDetails.jsx');
     const hamza={id:'hamza',name:'Hamza',claimed:true,paymentDetails:''};
     const multi=newRideBill('ali'); Object.assign(multi,{id:'multi',status:'published',creatorId:'ali',participants:['ali','sara','hamza'],fareCents:90000,payments:[{personId:'ali',amountCents:50000},{personId:'sara',amountCents:40000}]});
@@ -135,7 +160,7 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
       assert.equal(screen.getByLabelText('Item 1 quantity').value,'2');
       assert.equal(screen.getByLabelText('Discount percentage').value,'50');
       assert.equal(screen.getByLabelText('Discount eligible amount limit').value,'20000');
-      assert.equal(screen.getByLabelText('Tax amount').value,'0');
+      assert.equal(screen.getByLabelText('Tax amount').value,'');
       assert.equal(screen.getByLabelText('Final charged amount').value,'');
       assert.equal(screen.getByLabelText('Bill name').value,'My dinner');
       assert.equal(screen.getByLabelText('Date').value,'2026-11-04');

@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { separateServings } from '../shared/servings.js';
 import { equalAllocations } from '../shared/allocations.js';
-import { calculate, newBill, validateBill } from '../shared/calculations.js';
+import { calculate, validateBill } from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 import { draftSnapshot } from '../src/drafts.js';
 import { repeatBill } from '../src/repeat-bill.js';
 

@@ -4,7 +4,8 @@ import express from 'express';
 import { readFileSync } from 'node:fs';
 import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
 import { createApi } from '../server/api.js';
-import { newBill, newRideBill, calculate } from '../shared/calculations.js';
+import { newRideBill, calculate } from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 
 test('MongoDB: settlement, rides, permissions, concurrent actions and durable history', async t => {
   const replica = await MongoMemoryReplSet.create({ replSet: { count: 1 } });

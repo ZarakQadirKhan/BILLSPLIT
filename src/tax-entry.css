@@ -1,0 +1,8 @@
+.tax-entry { scroll-margin-top: 120px; }
+.tax-entry h2 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tax-entry-required { border: 2px solid #c06d12; background: #fffaf0; box-shadow: 0 0 0 3px #f8d89d55; }
+.tax-required-badge { background: #f9dfac; color: #713c04; padding: 5px 10px; border-radius: 20px; font-size: 12px; }
+.tax-entry-notice { color: #713c04; font-size: 14px; line-height: 1.5; }
+.tax-entry [aria-invalid="true"] { border: 2px solid #c06d12; background: white; }
+.tax-entry input:focus { outline: 3px solid #b9b2ff; outline-offset: 2px; }
+.tax-jump { margin-top: 12px; border-color: #c06d12; color: #713c04; }

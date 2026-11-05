@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MongoMemoryReplSet } from 'mongodb-memory-server-core';
 import { migrateLegacy } from '../server/migrate-legacy.js';
-import { newBill } from '../shared/calculations.js';
+import { billWithTax as newBill } from './helpers/bills.js';
 import { openDatabase } from '../server/database.js';
 import { MongoClient } from 'mongodb';
 

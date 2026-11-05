@@ -34,8 +34,8 @@ Local HTTP is for trusted Wi-Fi testing. HTTPS is needed for confidential traffi
 3. Save your transfer instructions in **Your profile**. Only known friends and participants in shared bills can see them. The app never transfers money.
 4. Add a bill. Select a JPG/PNG/WebP, paste receipt text, or enter items manually. AI mode asks permission before sending the photo through the server to OpenAI, then Google if needed, then bundled on-device OCR. Private mode sends no photo to any server. Our app never persists photos; only reviewed bill fields and numeric AI usage/reservations are stored. Leaving the editor discards the preview. Provider data-use terms still apply; `store:false` is not a promise of zero provider retention. OpenAI defaults to a cumulative $5 app budget, with no automatic reset or recharge; see deployment guidance.
 5. Check every extracted field. Edit quantities, unit prices, line totals, discounts, tax, fees, and the actual charged amount. A manual line-total override is labeled; editing quantity or unit price restores automatic line arithmetic.
-6. Add participants and select the original payer. Assign item quantities or share an item equally, including fractional quantities. Unassigned and over-assigned items are flagged. The payer must have joined and saved transfer instructions before sending.
-7. Save a private draft or send shares. Sending is blocked until all item units are assigned, the calculated and entered receipt totals agree, and no share is negative. Published bills are locked; their money amounts are recalculated and validated on the server.
+6. Add participants and select the original payer. Assign item quantities or share an item equally, including fractional quantities. Unassigned and over-assigned items are flagged. Anyone receiving repayments must have joined; transfer instructions are optional.
+7. Save a private draft or send shares. Sending is blocked until tax is explicitly entered (including 0), all item units are assigned, any entered receipt total agrees with the calculation, and no share is negative. Published bills are locked; their money amounts are recalculated and validated on the server.
 8. After transferring outside the app, choose **I’ve paid**, select the bills, and enter the amount actually paid. Partial payments are supported. A transfer can cover multiple bills owed to the same friend, applied in the order shown. The recipient confirms the whole report or rejects it with a note. Only confirmation reduces the debt; pending amounts are reserved so they cannot be reported twice.
 9. Overview groups outstanding bills by friend. **Still to pay** excludes both confirmed and pending amounts; **Pending** shows money already reported, with a warning not to pay again. Recipients see approval cards. Confirmed transfers appear under **Paid**, including partial payments. Activity contains persistent notifications, refreshed every 30 seconds while the app is visible.
 
@@ -43,7 +43,7 @@ Unfinished food and ride bills autosave on the current device. Resume them from 
 
 Assignment controls include **Only show unassigned items**, a sticky remaining count, collapsed completed items, **Split all items equally**, and one-step **Undo assignment**. Undo restores quantities assigned to people while preserving later price edits.
 
-When AI sees unresolved card/cash tax alternatives, it returns both for the editor to present as choices. Selecting one updates tax and any readable final total. Missing prices and unreadable totals become explicit questions and block publication until resolved. A clipped total is never invented. Manual bills do not require a receipt total.
+After scanning, enter the tax charged as an amount or percentage, including 0 when there was no tax. The editor does not ask for card/cash selection. Missing item prices must be resolved before sending; the final receipt total is an optional cross-check. A clipped total is never invented.
 
 ## inDrive rides
 
@@ -126,7 +126,7 @@ The outing screen shows total published spending, each person's original contrib
 
 Use **Add existing bill**, or **Add to an outing** on a bill, to organize an expense you created. Everyone on the bill must belong to the outing. Moving or detaching a bill requires its current version and leaves amounts and repayment history unchanged. Outing membership and bill access are checked on the server, including invitation claims.
 
-**Do this again** on a bill opens a fresh editable draft with the same participants, items, assignments, prices, discount/tax settings and original payer arrangement. It uses today's date and new item/draft identities. The previous outing, receipt reconciliation, manual reconciliation adjustment and all payment history are cleared. Review the amount and payer before sending; no new debts or notifications exist until publication.
+**Do this again** on a bill opens a fresh editable draft with the same participants, items, assignments, prices, discount/tax settings and original payer arrangement. It uses today's date and new item/draft identities. The previous outing, receipt reconciliation, manual reconciliation adjustment and all payment history are cleared. Enter tax again for a repeated food bill, and review the amount and payer before sending; no new debts or notifications exist until publication.
 
 ## Manual bills and multiple original payers
 
@@ -146,7 +146,7 @@ This outputs the temporary transcription, validated items and token-cost estimat
 
 ## Simpler bill review and in-app friends
 
-New bills use today's local date (editable) and a name supplied by the user. Scanning does not overwrite either. Enter tax as an amount or percentage, including zero: there is no card/cash choice. Scans start with zero tax and calculate the final total from reviewed items, discounts, entered tax and fees. The final receipt amount remains an optional cross-check, not a required scanner result. Missing item prices must still be resolved. Legacy receipt choice metadata no longer blocks sending.
+New bills use today's local date (editable) and a name supplied by the user. Scanning does not overwrite either. Enter tax as an amount or percentage, including zero: there is no card/cash choice. New, scanned and repeated food bills start with a blank required tax field. An explicit 0 is accepted; until then, totals are labeled before tax and sending is blocked. The highlighted tax section and Enter tax button guide the user to the field. The final total updates from reviewed items, discounts, entered tax and fees. Tax is allocated in proportion to each person’s ordered food value (before or after discounts according to the selected basis), even when fees are split equally. Ride fares remain all-inclusive. The final receipt amount remains an optional cross-check, not a required scanner result. Missing item prices must still be resolved. Legacy receipt choice metadata no longer blocks sending.
 
 Receiving repayments requires a joined account, but saving bank/wallet/transfer details is optional. Email verification is only needed for email notifications, not publishing bills.
 

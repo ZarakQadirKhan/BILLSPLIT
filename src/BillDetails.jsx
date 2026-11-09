@@ -222,6 +222,7 @@ export default function BillDetails({
                           <span className="debt-note">{debt.note}</span>
                         )}
                         {debt.reference && <small>Ref: {debt.reference}</small>}
+                        {debt.creditor_id === user.id && payableAmount(debt) > 0 && <button className="button primary" onClick={()=>onAction(debt,"received")}><Check size={16}/> Mark as paid</button>}
                         {debt.creditor_id === user.id && debt.status === "marked_paid" && debt.pending_amount==null && (
                           <div className="action-row">
                             <button

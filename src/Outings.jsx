@@ -46,7 +46,7 @@ export function OutingList({outings,bills,debts,onOpen,onCreate}) {
   </section>;
 }
 
-export function OutingDetails({outing,bills,debts,user,person,onBack,onOpen,onCreate,onRename,onAddExisting,onPaid}) {
+export function OutingDetails({outing,bills,debts,user,person,onBack,onOpen,onCreate,onRename,onAddExisting,onPaid,onReceived}) {
   const s=summarizeOuting(outing.id,bills,debts),mine=s.people[user.id]||{owe:0,owed:0,pendingIn:0,pendingOut:0},[tab,setTab]=useState('owe');
   const pending=s.debts.filter(d=>(d.debtor_id===user.id||d.creditor_id===user.id)&&pendingAmount(d)>0);
   return <div className="outing-detail"><button className="text-button back-button" onClick={onBack}><ArrowLeft size={16}/> All outings</button>
@@ -54,7 +54,7 @@ export function OutingDetails({outing,bills,debts,user,person,onBack,onOpen,onCr
     <div className="outing-total"><span>Total spent</span><strong>{money(s.total)}</strong><small>{s.published.length} published bills · Drafts excluded</small>{s.settled&&<span><CheckCheck size={16}/> Published bills settled</span>}</div>
     <div className="outing-actions"><button className="button primary" onClick={onCreate}><Plus size={18}/> Add expense</button><button className="button" onClick={onAddExisting}>Add existing bill</button></div>
     <div className="simple-totals outing-balances"><button aria-pressed={tab==='owe'} onClick={()=>setTab('owe')}><span>You still need to pay</span><strong>{money(mine.owe)}</strong><small>{money(mine.pendingOut)} awaiting confirmation</small></button><button aria-pressed={tab==='owed'} onClick={()=>setTab('owed')}><span>Still to receive</span><strong>{money(mine.owed)}</strong><small>{money(mine.pendingIn)} awaiting your confirmation</small></button></div>
-    <section className="card"><h2>{tab==='owe'?'Your repayments for this outing':'Repayments coming to you'}</h2><GroupedBalances debts={s.debts} bills={s.published} user={user} person={person} filter={tab} onOpen={onOpen} onPaid={onPaid}/>
+    <section className="card"><h2>{tab==='owe'?'Your repayments for this outing':'Repayments coming to you'}</h2><GroupedBalances debts={s.debts} bills={s.published} user={user} person={person} filter={tab} onOpen={onOpen} onPaid={onPaid} onReceived={onReceived}/>
       {pending.length>0&&<details className="outing-pending"><summary>Payments awaiting confirmation ({pending.length})</summary><p className="muted">Open the bill to review the payment report. Don’t pay the pending amount again.</p>{pending.map(d=><button className="balance-row" key={d.id} onClick={()=>onOpen(d.bill_id)}><span className="row-description"><strong>{person(d.debtor_id).name} → {person(d.creditor_id).name}</strong><small>{s.published.find(b=>b.id===d.bill_id)?.title}</small></span><strong>{money(pendingAmount(d))}</strong><ChevronRight size={16}/></button>)}</details>}
     </section>
     <section className="card"><h2>Who paid for the outing?</h2><p className="muted">Original bill payments and each person’s share, before repayments.</p><div className="outing-contributions"><div className="outing-contribution outing-table-head"><span>Friend</span><span>Paid</span><span>Share</span></div>{outing.members.map(id=><div className="outing-contribution" key={id}><strong>{person(id).name}</strong><span>{money(s.people[id]?.paid||0)}</span><span>{money(s.people[id]?.share||0)}</span></div>)}</div></section>

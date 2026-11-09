@@ -27,13 +27,13 @@ export default function HomeOverview({ debts, repayments=[], user, person, bills
     {waiting.length>0&&<button className="pending-summary" onClick={()=>setFilter('pending')}><span>Awaiting confirmation — don’t pay again</span><strong>{money(waiting.reduce((s,p)=>s+p.amount,0))}</strong></button>}
     <section className="card payment-list-card"><div className="section-heading"><h2>Your payments</h2></div>
       <div className="tabs payment-tabs" role="group" aria-label="Filter balances">{[['owe','You owe'],['owed','Owed to you'],['pending','Pending'],['paid','Paid']].map(([key,label])=><button key={key} aria-pressed={filter===key} className={filter===key?'active':''} onClick={()=>setFilter(key)}>{label}</button>)}</div>
-      {['owe','owed'].includes(filter)?<GroupedBalances debts={mine} user={user} person={person} bills={bills} filter={filter} onOpen={onOpen} onPaid={d=>onAction(d,'paid')}/>:<BalanceList debts={filter==='pending'?waiting:history} user={user} person={person} bills={bills} filter="all" paidHistory={filter==='paid'} pendingHistory={filter==='pending'} onOpen={onOpen}/>}
+      {['owe','owed'].includes(filter)?<GroupedBalances debts={mine} user={user} person={person} bills={bills} filter={filter} onOpen={onOpen} onPaid={d=>onAction(d,'paid')} onReceived={d=>onAction(d,'received')}/>:<BalanceList debts={filter==='pending'?waiting:history} user={user} person={person} bills={bills} filter="all" paidHistory={filter==='paid'} pendingHistory={filter==='pending'} onOpen={onOpen}/>}
     </section>
     {bills.length>0&&<section className="card"><div className="section-heading"><h2>Recent bills</h2><button className="text-button" onClick={onBills}>All bills <ArrowRight size={16}/></button></div>{children}</section>}
   </div>;
 }
 
-export function GroupedBalances({debts,user,person,bills,filter,onOpen,onPaid}) {
+export function GroupedBalances({debts,user,person,bills,filter,onOpen,onPaid,onReceived}) {
   const incoming=filter==='owed',groups=new Map();
   for(const d of debts) {
     if(d[incoming?'creditor_id':'debtor_id']!==user.id||!payableAmount(d)) continue;
@@ -47,7 +47,7 @@ export function GroupedBalances({debts,user,person,bills,filter,onOpen,onPaid}) 
       <div className="share-preview"><Avatar name={person(other).name}/><div className="row-description"><strong>{person(other).name}</strong><small>{incoming?'Owes you':'You owe'} · {new Set(rows.map(d=>d.bill_id)).size} bills</small></div><strong>{money(amount)}</strong></div>
       {rows.some(d => d.last_rejected_at) && <p className="notice">A payment wasn’t confirmed. The unpaid amount is back here; its original clock continues.</p>}
       <details><summary>Choose bills & see breakdown</summary>{rows.map(d=><button className="balance-row" key={d.id} onClick={()=>onOpen(d.bill_id)}><span>{bills.find(b=>b.id===d.bill_id)?.title||'Shared bill'}</span><strong>{money(payableAmount(d))}</strong><ChevronRight size={15}/></button>)}<small>You can select which bills to include in the payment form.</small></details>
-      {!incoming&&<button className="button primary" onClick={()=>onPaid({...rows[0],id:`group-${other}`,debts:rows.map(d=>({...d,billTitle:bills.find(b=>b.id===d.bill_id)?.title||'Shared bill'})),amount,paid_amount:0,pending_amount:0,status:'assigned'})}>I’ve paid</button>}
+      {(!incoming||onReceived)&&<button className="button primary" onClick={()=>(incoming?onReceived:onPaid)({...rows[0],id:`group-${other}`,debts:rows.map(d=>({...d,billTitle:bills.find(b=>b.id===d.bill_id)?.title||'Shared bill'})),amount,paid_amount:0,pending_amount:0,status:'assigned'})}>{incoming?'Mark as paid':'I’ve paid'}</button>}
     </section>;
   })}</div>;
 }

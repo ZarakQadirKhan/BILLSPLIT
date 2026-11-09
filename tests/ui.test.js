@@ -293,6 +293,24 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     await act(async()=>fireEvent.click(screen.getByRole('button',{name:'I’ve paid — notify Sara'})));
     assert.equal(paymentBody.amountCents,10000);assert.deepEqual(paymentBody.debtIds,['partial']);assert.ok(paymentBody.requestId);cleanup();
 
+    render(React.createElement(HomeOverview,{debts:[partiallyPaid,anotherDebt],repayments:[report],user:sara,person:pid=>pid==='ali'?user:sara,bills:paymentBills,onOpen(){},onAction:(d,a)=>{grouped=d;selectedAction=a;},onCreate(){},onBills(){}}));
+    fireEvent.click(screen.getByRole('button',{name:'Owed to you',exact:true}));
+    fireEvent.click(screen.getByRole('button',{name:'Mark as paid',exact:true}));
+    assert.equal(selectedAction,'received');assert.equal(grouped.amount,80000,'pending amount is excluded');cleanup();
+    paymentBody=null;
+    render(React.createElement(PaymentModal,{modal:{debt:grouped,action:'received'},person:pid=>pid==='ali'?user:sara,onClose(){},onSubmit:async body=>{paymentBody=body;}}));
+    assert.ok(screen.getByRole('heading',{name:'Record payment from Ali'}));
+    assert.equal(screen.getByLabelText('Amount received').value,'800');
+    assert.equal(screen.queryByText(/Transfer outside this app/),null);
+    assert.equal(paymentBody,null,'opening the form does not settle anything');
+    fireEvent.change(screen.getByLabelText('Amount received'),{target:{value:'900'}});
+    await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Mark as paid — I received this amount'})));
+    assert.equal(paymentBody,null);assert.ok(screen.getByRole('alert'));
+    fireEvent.click(screen.getByRole('checkbox',{name:/Ride home/}));
+    fireEvent.change(screen.getByLabelText('Amount received'),{target:{value:'200'}});
+    await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Mark as paid — I received this amount'})));
+    assert.equal(paymentBody.amountCents,20000);assert.deepEqual(paymentBody.debtIds,['partial']);assert.ok(paymentBody.requestId);cleanup();
+
     // Explicit receipt questions, including a price that must not vanish mid-entry.
     const choices={...bill,entryMode:'manual',discount:newBill('ali').discount,receiptTotalCents:null,receiptReview:{needsTotal:true,selectedOption:null,options:[{label:'Card',taxCents:150000,taxRate:5,taxBasis:null,receiptTotalCents:3150000},{label:'Cash',taxCents:480000,taxRate:16,taxBasis:null,receiptTotalCents:3480000}]}};
     render(React.createElement(BillEditor,{initial:choices,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));

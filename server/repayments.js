@@ -4,7 +4,7 @@ const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status
 const clean=(value,max)=>typeof value==='string'?value.trim().slice(0,max):'';
 export function createRepaymentService(db,mail,event,{clock=()=>new Date()}={}) {
   const now=()=>clock().toISOString();
-  async function report(user,body) {
+  async function report(user,body,received=false) {
     const {debtIds,amountCents,requestId}=body;
     if(!Array.isArray(debtIds)||!debtIds.length||debtIds.length>100||debtIds.some(x=>typeof x!=='string')||new Set(debtIds).size!==debtIds.length) fail('Choose up to 100 unique payments.');
     if(!Number.isSafeInteger(amountCents)||amountCents<=0||amountCents>10000000000) fail('Enter a valid payment amount greater than zero.');
@@ -13,28 +13,35 @@ export function createRepaymentService(db,mail,event,{clock=()=>new Date()}={}) 
     return db.transaction(async()=>{
       const existing=await db.one('repayments',{id});
       if(existing) {
-        if(existing.amount!==amountCents||JSON.stringify(existing.requestedDebtIds)!==JSON.stringify(debtIds)||existing.reference!==reference) fail('This payment request was already used. Reopen the form.',409);
+        if(existing.amount!==amountCents||JSON.stringify(existing.requestedDebtIds)!==JSON.stringify(debtIds)||existing.reference!==reference||!!existing.recorded_by_creditor!==received) fail('This payment request was already used. Reopen the form.',409);
         return existing;
       }
       const debts=[];
       for(const id of debtIds) {
         const d=await db.one('debts',{id});
-        if(!d||d.debtor_id!==user.id) fail('You can only report your own repayments.',403);
-        if(debts.length&&d.creditor_id!==debts[0].creditor_id) fail('A combined payment must go to one person.');
+        if(!d||d[received?'creditor_id':'debtor_id']!==user.id) fail(received?'You can only mark payments owed to you as received.':'You can only report your own repayments.',403);
+        const other=received?'debtor_id':'creditor_id';
+        if(debts.length&&d[other]!==debts[0][other]) fail('A combined payment must be between the same two people.');
         debts.push(d);
       }
       if(amountCents>debts.reduce((s,d)=>s+payableAmount(d),0)) fail('This amount exceeds what is still payable. Refresh your balances.',409);
       let left=amountCents; const allocations=[];
       for(const d of debts) {
         const amount=Math.min(left,payableAmount(d)); if(!amount) continue;
-        const paid=confirmedAmount(d),pending=pendingAmount(d)+amount;
+        const paid=confirmedAmount(d)+(received?amount:0),pending=pendingAmount(d)+(received?0:amount);
         allocations.push({debtId:d.id,billId:d.bill_id,amount}); left-=amount;
-        await db.update('debts',{id:d.id},{$set:{paid_amount:paid,pending_amount:pending,status:paymentStatus(d.amount,paid,pending),reference,marked_paid_at:now(),updated_at:now()}});
+        await db.update('debts',{id:d.id},{$set:{paid_amount:paid,pending_amount:pending,status:paymentStatus(d.amount,paid,pending),reference,marked_paid_at:now(),updated_at:now(),...(received?{confirmed_at:now()}:{})}});
       }
-      const payment={id,debtor_id:user.id,creditor_id:debts[0].creditor_id,amount:amountCents,allocations,requestedDebtIds:debtIds,reference,note:'',status:'pending',created_at:now()};
+      const payment={id,debtor_id:debts[0].debtor_id,creditor_id:debts[0].creditor_id,amount:amountCents,allocations,requestedDebtIds:debtIds,reference,note:'',status:received?'confirmed':'pending',created_at:now(),...(received?{recorded_by_creditor:true,recorded_by:user.id,reviewed_at:now()}:{})};
       await db.insert('repayments',payment);
-      await event(payment.creditor_id,allocations[0].billId,`${user.name} reported a payment. Please confirm the amount received.`);
-      await mail.queueRepayment('approval',payment,payment.creditor_id);
+      if(received) {
+        await event(payment.debtor_id,allocations[0].billId,`${user.name} confirmed receiving your payment. Balances updated.`);
+        await mail.queueRepayment('confirmed',payment,payment.debtor_id);
+        await mail.queueRepayment('confirmed',payment,payment.creditor_id);
+      } else {
+        await event(payment.creditor_id,allocations[0].billId,`${user.name} reported a payment. Please confirm the amount received.`);
+        await mail.queueRepayment('approval',payment,payment.creditor_id);
+      }
       return payment;
     });
   }
@@ -72,5 +79,5 @@ export function createRepaymentService(db,mail,event,{clock=()=>new Date()}={}) 
     if(claims.length!==1||claims[0].allocations.length!==1) fail('Open your dashboard to review the complete payment report.',409);
     return decide(user,claims[0].id,action,note);
   }
-  return {report,decide,decideDebt};
+  return {report:(user,body)=>report(user,body),receive:(user,body)=>report(user,body,true),decide,decideDebt};
 }

@@ -340,6 +340,7 @@ export async function createApi(dataDirectory, options = {}) {
     }); await deliver(); res.json(result);
   });
   api.post('/repayments', async (req,res) => { const result=await payments.report(req.user,req.body); await deliver(); res.status(201).json(result); });
+  api.post('/repayments/received', async (req,res) => { const result=await payments.receive(req.user,req.body); await deliver(); res.status(201).json(result); });
   api.post('/repayments/:id/action', async (req,res) => { const result=await payments.decide(req.user,req.params.id,req.body.action,req.body.note); await deliver(); res.json(result); });
   api.post('/debts/:id/action', async (req, res) => {
     const result = await db.transaction(async () => {

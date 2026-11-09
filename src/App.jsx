@@ -263,15 +263,15 @@ export default function App() {
   const action = async (debt, type, fields = {}) => {
     if(type==='paid')celebrationAudio.prime();
     let result;
-    try {result=await request(type==='paid'?'/repayments':debt.repaymentId?`/repayments/${encodeURIComponent(debt.repaymentId)}/action`:`/debts/${debt.id}/action`, {
+    try {result=await request(type==='received'?'/repayments/received':type==='paid'?'/repayments':debt.repaymentId?`/repayments/${encodeURIComponent(debt.repaymentId)}/action`:`/debts/${debt.id}/action`, {
       method: "POST",
-      body: type==='paid'?{debtIds:fields.debtIds||[debt.id],amountCents:fields.amountCents??payableAmount(debt),requestId:fields.requestId||id(),reference:fields.reference}:{ action: type, ...fields },
+      body: ['paid','received'].includes(type)?{debtIds:fields.debtIds||[debt.id],amountCents:fields.amountCents??payableAmount(debt),requestId:fields.requestId||id(),reference:fields.reference}:{ action: type, ...fields },
     });}catch(error){if(type==='paid')celebrationAudio.stop();throw error;}
     setModal(null);
     if(type==='paid')setCelebration({id:result.id,amount:result.amount,recipient:person(debt.creditor_id).name});
     await refresh();
     if(type!=='paid')notify(
-      type === "confirm"
+      ["confirm","received"].includes(type)
         ? "Payment confirmed. Balances updated."
         : "Payment request updated",
     );
@@ -480,7 +480,7 @@ export default function App() {
               onCopy={copy}
             />
           ) : outing ? (
-            <OutingDetails key={outing.id} outing={outing} bills={bills} debts={debts} user={user} person={person} onBack={()=>{setOutingId(null);setView('bills');setBillSection('outings');}} onOpen={setDetailId} onCreate={startBill} onRename={()=>setModal({type:'renameOuting',outing})} onAddExisting={()=>setModal({type:'existingOuting',outing})} onPaid={debt=>setModal({type:'payment',debt,action:'paid'})}/>
+            <OutingDetails key={outing.id} outing={outing} bills={bills} debts={debts} user={user} person={person} onBack={()=>{setOutingId(null);setView('bills');setBillSection('outings');}} onOpen={setDetailId} onCreate={startBill} onRename={()=>setModal({type:'renameOuting',outing})} onAddExisting={()=>setModal({type:'existingOuting',outing})} onPaid={debt=>setModal({type:'payment',debt,action:'paid'})} onReceived={debt=>setModal({type:'payment',debt,action:'received'})}/>
           ) : (
             <>
               {invite && (

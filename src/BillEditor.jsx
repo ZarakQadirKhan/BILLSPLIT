@@ -20,7 +20,7 @@ import { calculate, id, money, validateBill } from "../shared/calculations.js";
 import { parseReceipt } from "../shared/parser.js";
 import { request, prepareImage } from "./api.js";
 import { extractReceipt } from "./receipt-scan.js";
-import { Avatar, Breakdown, MoneyInput, Empty, Modal } from "./ui.jsx";
+import { Avatar, Breakdown, MoneyInput, NumberInput, Empty, Modal } from "./ui.jsx";
 import ItemAssignments from "./ItemAssignments.jsx";
 import { PayerPicker, TransferSummary, receiversReady } from "./Payers.jsx";
 import { assignedQuantity, equalAllocations } from "../shared/allocations.js";
@@ -496,7 +496,7 @@ export default function BillEditor({
                           <div className="item-numbers">
                             <label>
                               Quantity
-                              <input
+                              <NumberInput
                                 aria-label={`Item ${index + 1} quantity`}
                                 type="number"
                                 min="0.001"
@@ -614,7 +614,7 @@ export default function BillEditor({
                     <label>
                       Discount percentage
                       <div className="suffix-input">
-                        <input
+                        <NumberInput
                           aria-label="Discount percentage"
                           type="number"
                           min="0"
@@ -734,7 +734,7 @@ export default function BillEditor({
                     <label>
                       Tax percentage
                       <div className="suffix-input">
-                        <input
+                        <NumberInput
                           type="number"
                           min="0"
                           max="100"

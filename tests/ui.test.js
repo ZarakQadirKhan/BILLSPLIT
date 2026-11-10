@@ -350,6 +350,20 @@ test('interactive editor recalculates capped discounts, allocations and receipt 
     assert.ok(drafts.readDrafts(user.id).some(d=>d.bill.items[0]?.unitPriceCents===60000));
     cleanup();
 
+    // Actual editor controls all support erase-then-type, including bare numeric inputs.
+    const editable={...newBill('ali'),title:'Easy numbers',participants:['ali','sara'],items:[{id:'zero',name:'Food',quantity:1,unitPriceCents:0,allocations:[]}],discount:{...newBill('ali').discount,type:'percent'}};
+    render(React.createElement(BillEditor,{initial:editable,people:[user,sara],user,onAddFriend(){},onProfile(){},onClose(){},onSaved(){},notify(){}}));
+    for(const [label,replacement] of [['Item 1 unit price','12.50'],['Item 1 total','25'],['Item 1 quantity','2'],['Discount percentage','10'],['Tax amount','5']]){
+      const input=screen.getByLabelText(label);fireEvent.change(input,{target:{value:''}});assert.equal(input.value,'',label+' can be cleared');
+      fireEvent.change(input,{target:{value:replacement}});assert.equal(input.value,replacement);
+    }
+    fireEvent.change(screen.getByLabelText('Tax type'),{target:{value:'percent'}});
+    const taxRate=screen.getByLabelText('Tax percentage');fireEvent.change(taxRate,{target:{value:'0'}});fireEvent.change(taxRate,{target:{value:''}});assert.equal(taxRate.value,'');assert.equal(taxRate.getAttribute('aria-invalid'),'true');
+    fireEvent.change(taxRate,{target:{value:'5'}});
+    fireEvent.click(screen.getByRole('button',{name:'Choose who had what'}));
+    const assigned=screen.getByLabelText('Food quantity for Sara');fireEvent.change(assigned,{target:{value:'1'}});fireEvent.change(assigned,{target:{value:''}});assert.equal(assigned.value,'');
+    fireEvent.change(assigned,{target:{value:'0.5'}});assert.equal(assigned.value,'0.5');cleanup();
+
     // A saved/published draft must not reappear when its editor unmounts.
     function DraftHarness(){const b=React.useMemo(()=>({...newBill('hook-user'),title:'Draft hook'}),[]);const auto=drafts.useDraftAutosave('hook-user',b);return React.createElement('button',{onClick:auto.clear},auto.message);}
     render(React.createElement(DraftHarness));

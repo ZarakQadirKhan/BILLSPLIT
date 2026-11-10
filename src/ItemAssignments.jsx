@@ -7,7 +7,7 @@ import {
   setQuantity,
   tapAssignment,
 } from "../shared/allocations.js";
-import { Avatar } from "./ui.jsx";
+import { Avatar, NumberInput } from "./ui.jsx";
 
 export default function ItemAssignments({
   autoCollapse = false,
@@ -204,7 +204,7 @@ export default function ItemAssignments({
           {participants.map((p) => (
             <label className="precise-person" key={p.id}>
               {p.id === user.id ? "You" : p.name}
-              <input
+              <NumberInput
                 aria-label={`${item.name} quantity for ${p.name}`}
                 type="number"
                 inputMode="decimal"

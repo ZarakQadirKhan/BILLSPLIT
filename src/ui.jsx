@@ -10,6 +10,8 @@ import {
   ArrowRight,
 } from "lucide-react";
 import EmailSettings from "./EmailSettings.jsx";
+import NumberInput from "./NumberInput.jsx";
+export { NumberInput };
 import { payableAmount, pendingAmount, remainingAmount } from '../shared/payments.js';
 import { id } from '../shared/calculations.js';
 import { normalizeUsername, normalizeEmail } from "../shared/identity.js";
@@ -79,8 +81,8 @@ export function MoneyInput({ value, onChange, optional = false, ...props }) {
   return (
     <div className="money-input">
       <span>Rs</span>
-      <input
-        type="number"
+      <NumberInput
+        normalizeValue={text => text === "" && optional ? "" : toCents(text) / 100}
         inputMode="decimal"
         step="0.01"
         min={props.min ?? 0}
